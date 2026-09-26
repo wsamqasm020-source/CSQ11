@@ -9,7 +9,7 @@ import io
 import base64
 import os
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from database import (
     init_database, add_student, get_student_by_code, get_student_by_id,
     get_all_students, add_subject, get_all_subjects, get_subjects_by_department,
@@ -18,7 +18,8 @@ record_attendance, record_attendance_for_subject, get_attendance_by_subject, get
     get_student_group_name, get_last_attendance_time, verify_user, change_user_password,
     get_settings, save_settings, get_all_users, add_new_user, delete_user_by_username,
     get_students_attendance_status, get_subject_latest_attendance_date, get_subject_latest_attendance_date_before,
-    get_attendance_count_by_subject_date
+    get_attendance_count_by_subject_date, attendance_sync_event_exists,
+    verify_subject_qr_session_at
 )
 
 
@@ -137,6 +138,33 @@ def format_remaining_time(seconds):
     if minutes > 0:
         return f"{minutes} دقيقة و {secs} ثانية"
     return f"{secs} ثانية"
+
+
+def parse_attendance_scan_time(data):
+    event_id = str(data.get('event_id') or '').strip()
+    if event_id:
+        import uuid
+        try:
+            event_id = str(uuid.UUID(event_id))
+        except (ValueError, AttributeError) as exc:
+            raise ValueError('معرّف مزامنة غير صالح') from exc
+
+    if not data.get('offline_sync'):
+        return event_id or None, datetime.now()
+    if not event_id:
+        raise ValueError('معرّف المزامنة مطلوب')
+
+    scanned_at_value = data.get('scanned_at')
+    try:
+        scanned_at = datetime.fromisoformat(str(scanned_at_value).replace('Z', '+00:00'))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('وقت المسح غير صالح') from exc
+
+    now = datetime.now()
+    utc_scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
+    if utc_scanned_at < now - timedelta(days=7) or utc_scanned_at > now + timedelta(minutes=5):
+        raise ValueError('انتهت صلاحية سجل الحضور غير المتصل')
+    return event_id, scanned_at
 
 
 # ============================================
@@ -394,6 +422,14 @@ def student_api_scan_attendance():
     if not data or 'qr_data' not in data:
         return jsonify({'success': False, 'message': 'بيانات غير صالحة'}), 400
 
+    try:
+        event_id, scanned_at = parse_attendance_scan_time(data)
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
+    if event_id and attendance_sync_event_exists(event_id):
+        return jsonify({'success': True, 'already_synced': True, 'message': 'تمت مزامنة الحضور مسبقاً'})
+
     qr_data = str(data.get('qr_data', '')).strip()
 
     # يجب أن يكون QR خاص بمادة
@@ -412,7 +448,14 @@ def student_api_scan_attendance():
     session_token = match_session.group(1) if match_session else None
 
     # ✅ تحقق من صلاحية الـ session
-    if session_token:
+    if session_token and data.get('offline_sync'):
+        if not verify_subject_qr_session_at(subject_id, session_token, scanned_at):
+            return jsonify({
+                'success': False,
+                'message': 'كان QR منتهي الصلاحية وقت المسح أو تعذر التحقق منه',
+                'expired': True
+            }), 403
+    elif session_token:
         from database import verify_subject_qr_session
         if not verify_subject_qr_session(subject_id, session_token):
             return jsonify({
@@ -444,7 +487,9 @@ def student_api_scan_attendance():
     group_name = student.get('group_name', 'غير معروف') if student else 'غير معروف'
 
     # تسجيل الحضور
-    success = record_attendance(student_id, subject_id, group_name)
+    success = record_attendance(
+        student_id, subject_id, group_name, recorded_at=scanned_at, event_id=event_id
+    )
 
     if success:
         return jsonify({
@@ -770,6 +815,11 @@ def api_scan_qr():
     if not data:
         return jsonify({'success': False, 'message': 'بيانات غير صالحة'}), 400
 
+    try:
+        event_id, scanned_at = parse_attendance_scan_time(data)
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
+
     qr_data = str(data.get('qr_data') or '').strip()
     subject_id = data.get('subject_id')
     mode = (data.get('mode') or 'student').strip().lower()
@@ -786,6 +836,9 @@ def api_scan_qr():
     if not qr_data:
         return jsonify({'success': False, 'message': 'بيانات غير كاملة'}), 400
 
+    if event_id and attendance_sync_event_exists(event_id):
+        return jsonify({'success': True, 'already_synced': True, 'message': 'تمت مزامنة الحضور مسبقاً'})
+
     # subject_id مطلوب فقط لـ QR الطالب
     if not qr_data.startswith('SUBJECT:') and not subject_id:
         return jsonify({'success': False, 'message': 'اختر المادة أولاً'}), 400
@@ -801,7 +854,9 @@ def api_scan_qr():
         print(f'[API] Processing QR: {qr_data}, Subject: {subject_id}, Mode: {mode}')
 
         if qr_data.startswith('SUBJECT:'):
-            subject_result = record_attendance_for_subject(subject_id, group_name='مادة')
+            subject_result = record_attendance_for_subject(
+                subject_id, group_name='مادة', recorded_at=scanned_at, event_id=event_id
+            )
             if not subject_result.get('success'):
                 return jsonify({'success': False, 'message': subject_result.get('message', 'فشل تسجيل حضور المادة')}), 400
             return jsonify({
@@ -859,7 +914,9 @@ def api_scan_qr():
             }), 429
 
         group_name = student.get('group_name', 'غير معروف')
-        success = record_attendance(student_id, subject_id, group_name)
+        success = record_attendance(
+            student_id, subject_id, group_name, recorded_at=scanned_at, event_id=event_id
+        )
 
         if success:
             subjects = get_all_subjects() or []

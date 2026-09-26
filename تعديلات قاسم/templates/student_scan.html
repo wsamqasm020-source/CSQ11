@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#11998e">
+    <link rel="manifest" href="/static/manifest.json">
     <title>تسجيل الحضور - {{ student.full_name }}</title>
 
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="/static/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 
@@ -154,13 +156,30 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/html5-qrcode.min.js"></script>
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                .catch(error => console.warn('[PWA] Student scanner service worker failed:', error));
+        });
+    }
+</script>
 
 <script>
     let scanner = null;
     let scanning = false;
     let processing = false;
+
+    window.addEventListener('attendanceSyncComplete', event => {
+        const detail = event.detail || {};
+        if (detail.synced) {
+            showResult('success', '☁️', 'تمت مزامنة الحضور', `تم رفع ${detail.synced} سجل للسحابة`);
+        } else if (detail.remaining) {
+            showResult('warning', '⏳', 'المزامنة معلّقة', `بقي ${detail.remaining} سجل بانتظار المحاولة`);
+        }
+    });
 
     async function startScan() {
         if (scanning) return;
@@ -219,17 +238,24 @@
         document.getElementById('procOverlay').style.display = 'flex';
 
         try {
-            const res = await fetch('/student/api/scan-attendance', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ qr_data: text })
-            });
-            const data = await res.json();
+            const submission = await window.QRAttendance.submitAttendance(
+                '/student/api/scan-attendance',
+                { qr_data: text }
+            );
             document.getElementById('procOverlay').style.display = 'none';
 
+            if (submission.queued) {
+                showResult('warning', '⏳', 'حضورك محفوظ على الجهاز',
+                    'سيتم إرساله تلقائياً عند رجوع الإنترنت');
+                return;
+            }
+            if (submission.error) throw new Error(submission.error);
+            const data = submission.result;
             if (data.success) {
                 showResult('success', '✅', 'تم تسجيل حضورك!',
                     'المادة: ' + (data.subject_name || '—'));
+            } else if (data.already_registered) {
+                showResult('warning', '📋', 'مسجل مسبقاً', data.message || 'الحضور مسجل مسبقاً');
             } else {
                 const already = data.already_registered;
                 showResult(

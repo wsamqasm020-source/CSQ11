@@ -6,7 +6,7 @@
 import json
 import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
@@ -46,6 +46,103 @@ def _autoincrement():
 
 def _ignore():
     return 'ON CONFLICT DO NOTHING' if IS_POSTGRES else 'OR IGNORE'
+
+
+def _migrate_sqlite_to_postgres(conn):
+    if not IS_POSTGRES:
+        return
+
+    sqlite_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attendance.db')
+    if not os.path.isfile(sqlite_path):
+        return
+
+    import sqlite3
+    from psycopg2 import sql
+
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS app_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+
+    lock_id = 74289153021
+    migration_name = 'sqlite-attendance-db-v1'
+    cursor.execute('SELECT pg_advisory_lock(%s)', (lock_id,))
+    conn.commit()
+    try:
+        cursor.execute('SELECT 1 FROM app_migrations WHERE name = %s', (migration_name,))
+        if cursor.fetchone():
+            return
+
+        tables = (
+            'students', 'subjects', 'attendance', 'users', 'settings',
+            'grades', 'access_codes', 'active_subject_qr_sessions', 'promotion_log'
+        )
+        imported_total = 0
+        source_uri = f"file:{sqlite_path.replace(os.sep, '/')}?mode=ro"
+        with sqlite3.connect(source_uri, uri=True) as source:
+            source.row_factory = sqlite3.Row
+            for table in tables:
+                exists = source.execute(
+                    'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?',
+                    ('table', table)
+                ).fetchone()
+                if not exists:
+                    continue
+
+                source_columns = [
+                    row['name'] for row in source.execute(f'PRAGMA table_info("{table}")')
+                ]
+                cursor.execute(sql.SQL('SELECT * FROM {} LIMIT 0').format(sql.Identifier(table)))
+                target_columns = {column[0] for column in cursor.description}
+                columns = [column for column in source_columns if column in target_columns]
+                if 'id' not in columns:
+                    continue
+
+                identifiers = sql.SQL(', ').join(sql.Identifier(column) for column in columns)
+                placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in columns)
+                if table == 'users':
+                    updates = [column for column in columns if column != 'id']
+                    conflict_action = sql.SQL('DO UPDATE SET {}').format(
+                        sql.SQL(', ').join(
+                            sql.SQL('{} = EXCLUDED.{}').format(sql.Identifier(column), sql.Identifier(column))
+                            for column in updates
+                        )
+                    )
+                else:
+                    conflict_action = sql.SQL('DO NOTHING')
+                insert = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT (id) {}').format(
+                    sql.Identifier(table), identifiers, placeholders, conflict_action
+                )
+
+                imported_rows = 0
+                for row in source.execute(f'SELECT * FROM "{table}"'):
+                    cursor.execute(insert, tuple(row[column] for column in columns))
+                    imported_rows += max(cursor.rowcount, 0)
+                imported_total += imported_rows
+                if imported_rows:
+                    print(f'[DB Migration] {table}: {imported_rows} rows')
+
+                cursor.execute('SELECT pg_get_serial_sequence(%s, %s) AS sequence_name', (table, 'id'))
+                sequence = cursor.fetchone()['sequence_name']
+                if sequence:
+                    cursor.execute(sql.SQL('SELECT MAX(id) AS max_id FROM {}').format(sql.Identifier(table)))
+                    max_id = cursor.fetchone()['max_id']
+                    if max_id is not None:
+                        cursor.execute('SELECT setval(%s, %s, true)', (sequence, max_id))
+
+        cursor.execute('INSERT INTO app_migrations (name) VALUES (%s) ON CONFLICT (name) DO NOTHING', (migration_name,))
+        conn.commit()
+        print(f'[DB Migration] SQLite import complete: {imported_total} rows')
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.execute('SELECT pg_advisory_unlock(%s)', (lock_id,))
+        conn.commit()
 
 def init_database():
     """تهيئة قاعدة البيانات وإنشاء الجداول"""
@@ -90,6 +187,26 @@ def init_database():
             group_name TEXT,
             attendance_date DATE DEFAULT CURRENT_DATE,
             attendance_time TIME DEFAULT CURRENT_TIME
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS attendance_sync_events (
+            event_id TEXT PRIMARY KEY,
+            student_id INTEGER,
+            subject_id INTEGER NOT NULL,
+            scanned_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS attendance_sync_events (
+            event_id TEXT PRIMARY KEY,
+            student_id INTEGER,
+            subject_id INTEGER NOT NULL,
+            scanned_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -253,6 +370,9 @@ def init_database():
     except Exception:
         pass
 
+    if IS_POSTGRES:
+        _migrate_sqlite_to_postgres(conn)
+
     conn.close()
 
 def add_student(full_name, department, teacher_name, group_name, student_code, qr_code, qr_image=None):
@@ -391,29 +511,87 @@ def delete_subject(subject_id):
         print(f'[DB Error] delete_subject: {e}')
         return False
 
-def record_attendance(student_id, subject_id, group_name=None):
+def attendance_sync_event_exists(event_id):
+    if not event_id:
+        return False
     conn = get_db_connection()
     cursor = conn.cursor()
-    today = datetime.now().date()
+    cursor.execute(_q('SELECT 1 FROM attendance_sync_events WHERE event_id = ?'), (event_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
+def mark_attendance_sync_event(event_id, subject_id, scanned_at):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    event_time = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
+    values = (event_id, subject_id, event_time.strftime('%Y-%m-%d %H:%M:%S'))
+    if IS_POSTGRES:
+        cursor.execute('''
+            INSERT INTO attendance_sync_events (event_id, subject_id, scanned_at)
+            VALUES (%s, %s, %s) ON CONFLICT (event_id) DO NOTHING
+        ''', values)
+    else:
+        cursor.execute('''
+            INSERT OR IGNORE INTO attendance_sync_events (event_id, subject_id, scanned_at)
+            VALUES (?, ?, ?)
+        ''', values)
+    conn.commit()
+    inserted = cursor.rowcount > 0
+    conn.close()
+    return inserted
+
+
+def record_attendance(student_id, subject_id, group_name=None, recorded_at=None, event_id=None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    scanned_at = recorded_at or datetime.now()
+    scan_local = scanned_at
+    event_time = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
+    scanned_date = scan_local.date().isoformat()
+    scanned_time = scan_local.time().replace(tzinfo=None, microsecond=0).isoformat()
+
+    if event_id:
+        event_values = (event_id, student_id, subject_id, event_time.strftime('%Y-%m-%d %H:%M:%S'))
+        if IS_POSTGRES:
+            cursor.execute('''
+                INSERT INTO attendance_sync_events (event_id, student_id, subject_id, scanned_at)
+                VALUES (%s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING
+            ''', event_values)
+        else:
+            cursor.execute('''
+                INSERT OR IGNORE INTO attendance_sync_events (event_id, student_id, subject_id, scanned_at)
+                VALUES (?, ?, ?, ?)
+            ''', event_values)
+        if cursor.rowcount == 0:
+            conn.commit()
+            conn.close()
+            return True
+
     cursor.execute(_q('''
         SELECT * FROM attendance 
         WHERE student_id = ? AND subject_id = ? AND attendance_date = ?
-    '''), (student_id, subject_id, today))
+    '''), (student_id, subject_id, scanned_date))
     if cursor.fetchone():
+        conn.rollback()
         conn.close()
         return False
     cursor.execute(_q('''
         INSERT INTO attendance (student_id, subject_id, group_name, attendance_date, attendance_time)
-        VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME)
-    '''), (student_id, subject_id, group_name))
+        VALUES (?, ?, ?, ?, ?)
+    '''), (student_id, subject_id, group_name, scanned_date, scanned_time))
     conn.commit()
     conn.close()
     return True
 
 
-def record_attendance_for_subject(subject_id, group_name=None):
+def record_attendance_for_subject(subject_id, group_name=None, recorded_at=None, event_id=None):
     """تسجيل حضور مادة كاملة: يضيف حضور لكل طلاب نفس المادة في اليوم الحالي."""
     try:
+        if event_id and attendance_sync_event_exists(event_id):
+            return {'success': True, 'saved': 0, 'total': 0, 'already_synced': True}
+
         subject = None
         for item in get_all_subjects():
             if item.get('id') == int(subject_id):
@@ -441,8 +619,13 @@ def record_attendance_for_subject(subject_id, group_name=None):
 
         saved = 0
         for student in matched_students:
-            if record_attendance(student.get('id'), subject_id, group_name or student.get('group_name')):
+            if record_attendance(
+                student.get('id'), subject_id, group_name or student.get('group_name'), recorded_at
+            ):
                 saved += 1
+
+        if event_id:
+            mark_attendance_sync_event(event_id, subject_id, recorded_at or datetime.now())
 
         return {'success': True, 'saved': saved, 'total': len(matched_students), 'message': f'تم تسجيل حضور {saved} طالباً في المادة'}
     except Exception as e:
@@ -798,8 +981,10 @@ def create_subject_qr_session(subject_id, duration_minutes=30):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # احذف جميع الجلسات القديمة لهذه المادة
-        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE subject_id = ?'), (subject_id,))
+        # Keep expired QR sessions briefly so offline scans can be validated at scan time.
+        from datetime import timedelta
+        retention_cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (retention_cutoff,))
         
         # أنشئ جلسة جديدة بـ token فريد
         session_token = uuid.uuid4().hex
@@ -842,13 +1027,40 @@ def verify_subject_qr_session(subject_id, session_token):
         return False
 
 
+def verify_subject_qr_session_at(subject_id, session_token, scanned_at):
+    """Verify that a queued scan occurred while its subject QR session was valid."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(_q('''
+            SELECT created_at, expires_at FROM active_subject_qr_sessions
+            WHERE subject_id = ? AND session_token = ?
+        '''), (subject_id, session_token))
+        result = cursor.fetchone()
+        conn.close()
+        if not result or not result['expires_at']:
+            return False
+
+        created_at = result['created_at']
+        expires_at = result['expires_at']
+        if not isinstance(created_at, datetime):
+            created_at = datetime.fromisoformat(str(created_at))
+        if not isinstance(expires_at, datetime):
+            expires_at = datetime.fromisoformat(str(expires_at))
+        return created_at <= scanned_at <= expires_at
+    except Exception as e:
+        print(f'[DB Error] verify_subject_qr_session_at: {e}')
+        return False
+
+
 def cleanup_expired_qr_sessions():
     """ينظف الجلسات المنتهية من قاعدة البيانات"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (now,))
+        from datetime import timedelta
+        cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (cutoff,))
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()

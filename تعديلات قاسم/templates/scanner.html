@@ -142,17 +142,63 @@
 
     document.addEventListener('DOMContentLoaded', function() {
         loadAllSubjects();
+        cacheStudentsForOffline();
         if (window.Html5Qrcode) {
             html5QrCode = new Html5Qrcode('reader');
         }
+    });
+
+    window.addEventListener('attendanceSyncComplete', event => {
+        const detail = event.detail || {};
+        if (detail.synced) showToast(`تمت مزامنة ${detail.synced} سجل حضور`, 'success');
+        else if (detail.remaining) showToast(`بقي ${detail.remaining} سجل بانتظار المزامنة`, 'warning');
     });
 
     async function loadAllSubjects() {
         try {
             const res = await fetch('/api/get-subjects');
             const data = await res.json();
-            if (data.success) allSubjects = data.subjects || [];
-        } catch (e) { console.error(e); }
+            if (!res.ok || !data.success) throw new Error(data.message || 'تعذر تحميل المواد');
+            allSubjects = data.subjects || [];
+            await window.QRAttendance?.OfflineDB.cacheSubjects(allSubjects);
+            return;
+        } catch (e) {
+            console.warn('[Scanner] Loading cached subjects:', e);
+        }
+
+        try {
+            allSubjects = await window.QRAttendance?.OfflineDB.getCachedSubjects() || [];
+            if (!allSubjects.length) {
+                showToast('افتح الماسح مرة واحدة وأنت متصل لتحميل المواد للاستخدام دون إنترنت', 'warning');
+            }
+        } catch (e) {
+            showToast('تعذر تحميل المواد المحفوظة على هذا الجهاز', 'error');
+        }
+    }
+
+    async function getStudentsForScanner() {
+        const offlineDB = window.QRAttendance.OfflineDB;
+        try {
+            const response = await fetch('/api/get-students');
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.message || 'تعذر تحميل الطلاب');
+            const students = (data.students || []).map(student => ({
+                id: student.id,
+                full_name: student.full_name,
+                student_code: student.student_code,
+                qr_code: student.qr_code,
+                group_name: student.group_name
+            }));
+            await offlineDB.cacheStudents(students);
+            return students;
+        } catch (error) {
+            console.warn('[Scanner] Loading cached students:', error);
+            return offlineDB.getCachedStudents();
+        }
+    }
+
+    function cacheStudentsForOffline() {
+        getStudentsForScanner().catch(error => console.warn('[Scanner] Student cache unavailable:', error));
     }
 
     // ============================================
@@ -268,51 +314,52 @@
     // ============================================
     // ماسح QR الطالب
     // ============================================
-    function searchStudentByName() {
+    async function searchStudentByName() {
         const name = document.getElementById('manualStudentName').value.trim();
         const subjectId = document.getElementById('subjectSelect').value;
         if (!subjectId) { showToast('اختر المادة أولاً', 'warning'); return; }
         if (!name) { showToast('اكتب اسم الطالب أولاً', 'warning'); return; }
 
-        fetch('/api/get-students')
-            .then(r => r.json())
-            .then(data => {
-                if (!data.success) throw new Error(data.message);
-                const matched = (data.students || []).find(s => s.full_name && s.full_name.includes(name));
-                if (!matched) { showToast('لم يتم العثور على طالب بهذا الاسم', 'warning'); return; }
-                document.getElementById('manualStudentName').value = matched.full_name;
-                showToast(`تم العثور على: ${matched.full_name}`, 'success');
-            })
-            .catch(err => showToast(err.message || 'تعذر البحث', 'error'));
+        try {
+            const students = await getStudentsForScanner();
+            const matched = students.find(student => student.full_name && student.full_name.includes(name));
+            if (!matched) { showToast('لم يتم العثور على طالب بهذا الاسم', 'warning'); return; }
+            document.getElementById('manualStudentName').value = matched.full_name;
+            showToast(`تم العثور على: ${matched.full_name}`, 'success');
+        } catch (error) {
+            showToast(error.message || 'تعذر البحث', 'error');
+        }
     }
 
-    function submitManualAttendance() {
+    async function submitManualAttendance() {
         const subjectId = document.getElementById('subjectSelect').value;
         const studentName = document.getElementById('manualStudentName').value.trim();
         if (!subjectId) { showToast('اختر المادة أولاً', 'warning'); return; }
         if (!studentName) { showToast('اكتب اسم الطالب أو ابحث عنه أولاً', 'warning'); return; }
 
-        fetch('/api/get-students')
-            .then(r => r.json())
-            .then(data => {
-                if (!data.success) throw new Error(data.message);
-                const matched =
-                    (data.students || []).find(s => s.full_name && s.full_name.toLowerCase() === studentName.toLowerCase()) ||
-                    (data.students || []).find(s => s.full_name && s.full_name.includes(studentName));
-                if (!matched) { showToast('الطالب غير موجود', 'warning'); return null; }
-                return fetch('/api/scan-qr', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ qr_data: matched.qr_code, subject_id: Number(subjectId) })
-                });
-            })
-            .then(r => r ? r.json() : null)
-            .then(result => {
-                if (!result) return;
-                if (!result.success) throw new Error(result.message);
-                showToast(result.message || 'تم تسجيل الحضور بنجاح', 'success');
-            })
-            .catch(err => showToast(err.message || 'تعذر تسجيل الحضور', 'error'));
+        try {
+            const students = await getStudentsForScanner();
+            const matched =
+                students.find(student => student.full_name && student.full_name.toLowerCase() === studentName.toLowerCase()) ||
+                students.find(student => student.full_name && student.full_name.includes(studentName));
+            if (!matched) { showToast('الطالب غير موجود', 'warning'); return; }
+
+            const submission = await window.QRAttendance.submitAttendance('/api/scan-qr', {
+                qr_data: matched.qr_code,
+                subject_id: Number(subjectId)
+            });
+            if (submission.queued) {
+                showToast('حُفظ الحضور على هذا الجهاز، وسيُرفع تلقائياً عند رجوع الإنترنت', 'info');
+            } else if (submission.error) {
+                showToast(submission.error, 'error');
+            } else if (submission.result.already_registered) {
+                showToast(submission.result.message || 'الحضور مسجل مسبقاً', 'warning');
+            } else {
+                showToast(submission.result.message || 'تم تسجيل الحضور بنجاح', 'success');
+            }
+        } catch (error) {
+            showToast(error.message || 'تعذر تسجيل الحضور', 'error');
+        }
     }
 
     async function toggleScanner() {
@@ -354,7 +401,7 @@
         isProcessing = true;
 
         const subjectId = document.getElementById('subjectSelect').value;
-        Swal.fire({
+        if (window.Swal) Swal.fire({
             title: 'جاري تسجيل الحضور...',
             allowOutsideClick: false,
             showConfirmButton: false,
@@ -363,26 +410,38 @@
 
         try {
             const isSubjectMode = decodedText.startsWith('SUBJECT:');
-            const res = await fetch('/api/scan-qr', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const submission = await window.QRAttendance.submitAttendance('/api/scan-qr', {
                     qr_data: decodedText,
                     subject_id: Number(subjectId),
                     mode: isSubjectMode ? 'subject' : 'student'
-                })
             });
-            const data = await res.json();
+            if (submission.queued) {
+                showToast('حُفظ الحضور على هذا الجهاز، وسيُرفع تلقائياً عند رجوع الإنترنت', 'info');
+                return;
+            }
+            if (submission.error) throw new Error(submission.error);
+            const data = submission.result;
+            if (data.already_registered) {
+                showToast(data.message || 'الحضور مسجل مسبقاً', 'warning');
+                return;
+            }
             if (!data.success) throw new Error(data.message);
             showToast(data.message, 'success');
         } catch (err) {
             showToast(err.message || 'تعذر تسجيل الحضور', 'error');
         } finally {
-            setTimeout(() => { Swal.close(); isProcessing = false; }, 800);
+            setTimeout(() => {
+                if (window.Swal) Swal.close();
+                isProcessing = false;
+            }, 800);
         }
     }
 
     function showToast(message, type = 'success') {
+        if (!window.Swal) {
+            window.alert(message);
+            return;
+        }
         const colors = { success: '#28a745', error: '#dc3545', warning: '#ffc107', info: '#17a2b8' };
         Swal.fire({
             title: { success: '✅ نجاح', error: '❌ خطأ', warning: '⚠️ تنبيه', info: 'ℹ️ معلومة' }[type] || 'تنبيه',

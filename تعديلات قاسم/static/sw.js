@@ -1,4 +1,4 @@
-const CACHE_NAME = 'attendance-v9';
+const CACHE_NAME = 'attendance-v11';
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
 ];
 
 // هذه المسارات لا تُخزن في الـ cache أبداً
-const BYPASS_PATHS = ['/logout', '/login', '/', '/student/login', '/teacher/login', '/static/uploads/'];
+const BYPASS_PATHS = ['/logout', '/login', '/student/login', '/teacher/login', '/static/uploads/'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -49,7 +49,9 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   // تجاوز الـ cache لهذه المسارات
-  const shouldBypass = BYPASS_PATHS.some(p => url.pathname === p || url.pathname.startsWith(p));
+  const shouldBypass = BYPASS_PATHS.some(p =>
+    url.pathname === p || url.pathname.startsWith(p.endsWith('/') ? p : `${p}/`)
+  );
   if (shouldBypass) return;
 
   if (url.pathname.startsWith('/api/')) return;
@@ -58,7 +60,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          if (response && response.ok && response.status === 200) {
+          if (response && response.ok && response.status === 200 && new URL(response.url).pathname === url.pathname) {
             const responseClone = response.clone();
             caches.open(CACHE_NAME).then(c => c.put(event.request, responseClone));
           }
@@ -94,7 +96,13 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('sync', (event) => {
-  if (event.tag === 'sync-attendance') event.waitUntil(Promise.resolve());
+  if (event.tag === 'sync-attendance') {
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+        clients.forEach(client => client.postMessage({ type: 'sync-attendance' }));
+      })
+    );
+  }
 });
 
-console.log('[SW] v9 loaded');
+console.log('[SW] v11 loaded');

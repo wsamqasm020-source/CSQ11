@@ -70,7 +70,7 @@
                 const store = transaction.objectStore('pendingAttendance');
                 const request = store.add({
                     ...record,
-                    timestamp: new Date().toISOString(),
+                    timestamp: record.timestamp || new Date().toISOString(),
                     synced: false
                 });
                 request.onsuccess = () => resolve(request.result);
@@ -101,6 +101,21 @@
                 const request = store.delete(id);
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
+            });
+        },
+
+        async updatePendingAttendance(id, changes) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['pendingAttendance'], 'readwrite');
+                const store = transaction.objectStore('pendingAttendance');
+                const request = store.get(id);
+                request.onsuccess = () => {
+                    if (request.result) store.put({ ...request.result, ...changes });
+                };
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
             });
         },
 
@@ -138,9 +153,32 @@
             if (!this.db) await this.init();
             const transaction = this.db.transaction(['students'], 'readwrite');
             const store = transaction.objectStore('students');
+            store.clear();
             for (const student of students) {
                 store.put(student);
             }
+        },
+
+        async cacheSubjects(subjects) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['subjects'], 'readwrite');
+                const store = transaction.objectStore('subjects');
+                for (const subject of subjects) store.put(subject);
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
+        },
+
+        async getCachedSubjects() {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['subjects'], 'readonly');
+                const request = transaction.objectStore('subjects').getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
         },
 
         async getCachedStudents() {
@@ -181,7 +219,62 @@
         }
     }
 
-    // Sync pending data when back online - SILENT MODE
+    function createEventId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, character => {
+            const random = Math.random() * 16 | 0;
+            return (character === 'x' ? random : (random & 0x3 | 0x8)).toString(16);
+        });
+    }
+
+    function scheduleBackgroundSync() {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.ready.then(registration => {
+            if (registration.sync) return registration.sync.register('sync-attendance');
+        }).catch(error => console.warn('[Sync] Background sync unavailable:', error));
+    }
+
+    async function submitAttendance(endpoint, payload) {
+        await OfflineDB.init();
+        const eventId = payload.event_id || createEventId();
+        const timestamp = new Date().toISOString();
+        const queuedPayload = { ...payload, event_id: eventId };
+        const queueId = await OfflineDB.addPendingAttendance({
+            endpoint,
+            payload: queuedPayload,
+            timestamp,
+            event_id: eventId
+        });
+
+        scheduleBackgroundSync();
+        if (!navigator.onLine) return { queued: true, event_id: eventId };
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(queuedPayload)
+            });
+            const result = await response.json().catch(() => ({}));
+            if (result.success || result.already_registered || result.already_synced) {
+                await OfflineDB.markAsSynced(queueId);
+                return { queued: false, result };
+            }
+
+            if (response.status < 500) {
+                await OfflineDB.markAsSynced(queueId);
+                return { queued: false, result, error: result.message || 'تعذر تسجيل الحضور' };
+            }
+            return { queued: true, result, event_id: eventId };
+        } catch (error) {
+            return { queued: true, error, event_id: eventId };
+        }
+    }
+
+    // Replay durable attendance records when connectivity returns.
     async function syncPendingData() {
         if (AppState.isSyncing || !AppState.isOnline) return;
         
@@ -194,23 +287,42 @@
                 return;
             }
 
-            // مزامنة صامتة بدون إشعارات
+            let syncedCount = 0;
             for (const record of pending) {
                 try {
-                    const response = await fetch('/api/scan-qr', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            qr_data: record.qr_data,
-                            subject_id: record.subject_id
-                        })
+                    const endpoint = record.endpoint || '/api/scan-qr';
+                    const storedPayload = record.payload || {
+                        qr_data: record.qr_data,
+                        subject_id: record.subject_id
+                    };
+                    const eventId = storedPayload.event_id || record.event_id || createEventId();
+                    const timestamp = record.timestamp || new Date().toISOString();
+                    const payload = {
+                        ...storedPayload,
+                        event_id: eventId,
+                        offline_sync: true,
+                        scanned_at: timestamp
+                    };
+                    await OfflineDB.updatePendingAttendance(record.id, {
+                        endpoint,
+                        event_id: eventId,
+                        payload: { ...storedPayload, event_id: eventId },
+                        timestamp
                     });
-                    
-                    if (response.ok) {
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const result = await response.json().catch(() => ({}));
+                    if (result.success || result.already_registered || result.already_synced) {
                         await OfflineDB.markAsSynced(record.id);
-                        console.log('[Sync] Record synced silently:', record.id);
+                        syncedCount += 1;
+                        console.log('[Sync] Attendance synced:', record.id);
                     } else {
-                        console.error('[Sync] Failed to sync record:', await response.text());
+                        console.error('[Sync] Attendance remains queued:', result.message || response.status);
                     }
                 } catch (error) {
                     console.error('[Sync] Network error during sync:', error);
@@ -219,7 +331,10 @@
             }
             
             AppState.lastSync = new Date();
-            console.log('[Sync] Silent sync completed at', AppState.lastSync);
+            window.dispatchEvent(new CustomEvent('attendanceSyncComplete', {
+                detail: { synced: syncedCount, remaining: (await OfflineDB.getPendingAttendance()).length }
+            }));
+            console.log('[Sync] Completed at', AppState.lastSync, 'records:', syncedCount);
         } finally {
             AppState.isSyncing = false;
         }
@@ -236,6 +351,11 @@
 
         window.addEventListener('online', handleNetworkChange);
         window.addEventListener('offline', handleNetworkChange);
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data && event.data.type === 'sync-attendance') syncPendingData();
+            });
+        }
 
         if (navigator.onLine) {
             syncPendingData();
@@ -246,7 +366,8 @@
     window.QRAttendance = {
         AppState,
         OfflineDB,
-        syncPendingData
+        syncPendingData,
+        submitAttendance
     };
 
 })();
