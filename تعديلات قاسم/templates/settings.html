@@ -1,0 +1,279 @@
+{% extends 'base.html' %}
+
+{% block title %}الإعدادات - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <!-- عنوان الصفحة -->
+            <div class="text-center mb-5">
+                <h2 class="fw-bold text-white">
+                    <i class="fas fa-cog me-2"></i>الإعدادات
+                </h2>
+                <p class="text-white-50">إدارة إعدادات النظام والمستخدمين</p>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }} alert-dismissible fade show" role="alert">
+                            <i class="fas fa-{{ 'exclamation-circle' if category == 'error' else 'check-circle' }} me-2"></i>
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="row g-4">
+                {% if is_admin %}
+                <!-- إعدادات الصفحة الرئيسية - بس للـ admin -->
+                <div class="col-md-6">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-image me-2"></i>إعدادات الصفحة الرئيسية
+                            </h5>
+                        </div>
+                        <div class="card-body p-4">
+                            <form method="POST" action="{{ url_for('update_settings') }}" enctype="multipart/form-data">
+                                <input type="hidden" name="setting_type" value="general">
+                                
+                                <!-- صورة القسم -->
+                                <div class="mb-4 text-center">
+                                    <label class="form-label fw-bold">صورة القسم/الكلية</label>
+                                    <p class="text-muted small mb-2">تظهر هنا وأيضاً في صفحة تسجيل الدخول</p>
+                                    <div class="position-relative d-inline-block">
+                                        <img id="previewImage" 
+                                             src="{{ settings.dept_image_url or 'https://via.placeholder.com/150x150?text=صورة+القسم' }}" 
+                                             class="rounded-circle shadow mb-3" 
+                                             style="width: 150px; height: 150px; object-fit: cover; border: 4px solid #667eea; background: white;"
+                                             onerror="this.style.background='#f0f0f0'; this.style.border='3px solid #e0e0e0';">
+                                        <div class="position-absolute bottom-0 end-0">
+                                            <label for="deptImage" class="btn btn-primary btn-sm rounded-circle" style="width: 40px; height: 40px; display:flex; align-items:center; justify-content:center;">
+                                                <i class="fas fa-camera"></i>
+                                            </label>
+                                            <input type="file" id="deptImage" name="dept_image" class="d-none" accept="image/*" onchange="previewFile()">
+                                        </div>
+                                    </div>
+                                    <small class="text-muted d-block mt-1">انقر على الأيقونة لتغيير الصورة</small>
+                                    <div id="newImageBadge" class="d-none mt-2">
+                                        <span class="badge bg-success">✓ صورة جديدة جاهزة للحفظ</span>
+                                    </div>
+                                </div>
+
+                                <!-- اسم القسم -->
+                                <div class="form-floating mb-3">
+                                    <input type="text" class="form-control" id="deptName" name="dept_name" 
+                                           value="{{ settings.dept_name or 'قسم علوم الحاسوب' }}" required>
+                                    <label for="deptName">اسم القسم/الكلية</label>
+                                </div>
+
+                                <!-- الوصف -->
+                                <div class="form-floating mb-3">
+                                    <input type="text" class="form-control" id="deptSubtitle" name="dept_subtitle" 
+                                           value="{{ settings.dept_subtitle or 'نظام إدارة الحضور والغياب' }}">
+                                    <label for="deptSubtitle">الوصف الفرعي</label>
+                                </div>
+
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-save me-2"></i>حفظ الإعدادات
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- إدارة المستخدمين - بس للـ admin -->
+                <div class="col-md-6">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-users-cog me-2"></i>إدارة المستخدمين
+                            </h5>
+                        </div>
+                        <div class="card-body p-4">
+                            <!-- قائمة المستخدمين -->
+                            <div class="mb-4">
+                                <h6 class="fw-bold mb-3">المستخدمون الحاليون:</h6>
+                                <div class="list-group">
+                                    {% for user in users %}
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <i class="fas fa-user-circle text-primary me-2"></i>
+                                            <span class="fw-bold">{{ user.username }}</span>
+                                            <small class="text-muted d-block ms-4">{{ user.created_at }}</small>
+                                        </div>
+                                        {% if user.username != 'admin' %}
+                                        <button class="btn btn-outline-danger btn-sm" onclick="deleteUser('{{ user.username }}')">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                        {% else %}
+                                        <span class="badge bg-primary">مدير</span>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <hr class="my-4">
+
+                            <!-- إضافة مستخدم جديد -->
+                            <h6 class="fw-bold mb-3 text-success">
+                                <i class="fas fa-user-plus me-2"></i>إضافة مستخدم جديد
+                            </h6>
+                            <form method="POST" action="{{ url_for('add_user') }}">
+                                <div class="form-floating mb-3">
+                                    <input type="text" class="form-control" id="newUsername" name="username" placeholder="اسم المستخدم" required>
+                                    <label for="newUsername">اسم المستخدم</label>
+                                </div>
+                                <div class="form-floating mb-3">
+                                    <input type="password" class="form-control" id="newPassword" name="password" placeholder="كلمة المرور" required minlength="6">
+                                    <label for="newPassword">كلمة المرور</label>
+                                </div>
+                                <div class="form-floating mb-3">
+                                    <input type="password" class="form-control" id="confirmNewPassword" name="confirm_password" placeholder="تأكيد كلمة المرور" required>
+                                    <label for="confirmNewPassword">تأكيد كلمة المرور</label>
+                                </div>
+                                <button type="submit" class="btn btn-success w-100">
+                                    <i class="fas fa-plus me-2"></i>إضافة مستخدم
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- تغيير كلمة المرور - للجميع -->
+                <div class="col-md-6 {{ 'mx-auto' if not is_admin }}">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-warning text-dark">
+                            <h5 class="mb-0">
+                                <i class="fas fa-key me-2"></i>تغيير كلمة المرور
+                            </h5>
+                        </div>
+                        <div class="card-body p-4">
+                            <form method="POST" action="{{ url_for('change_password_admin') }}">
+                                <div class="form-floating mb-3">
+                                    <input type="password" class="form-control" id="currentPwd" name="current_password" placeholder="كلمة المرور الحالية" required>
+                                    <label for="currentPwd">كلمة المرور الحالية</label>
+                                </div>
+                                <div class="form-floating mb-3">
+                                    <input type="password" class="form-control" id="newPwd" name="new_password" placeholder="كلمة المرور الجديدة" required minlength="6">
+                                    <label for="newPwd">كلمة المرور الجديدة</label>
+                                </div>
+                                <div class="form-floating mb-3">
+                                    <input type="password" class="form-control" id="confirmNewPwd" name="confirm_password" placeholder="تأكيد كلمة المرور" required>
+                                    <label for="confirmNewPwd">تأكيد كلمة المرور الجديدة</label>
+                                </div>
+                                <button type="submit" class="btn btn-warning w-100 text-dark fw-bold">
+                                    <i class="fas fa-sync-alt me-2"></i>تحديث كلمة المرور
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- معلومات النظام - للجميع -->
+                <div class="col-md-6">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-info-circle me-2"></i>معلومات النظام
+                            </h5>
+                        </div>
+                        <div class="card-body p-4">
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-database me-2 text-primary"></i>قاعدة البيانات</span>
+                                    <span class="badge bg-success">متصلة</span>
+                                </li>
+                                {% if is_admin %}
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-users me-2 text-primary"></i>عدد المستخدمين</span>
+                                    <span class="badge bg-primary rounded-pill">{{ users|length }}</span>
+                                </li>
+                                {% endif %}
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-user-check me-2 text-primary"></i>المستخدم الحالي</span>
+                                    <span class="fw-bold text-primary">{{ session.username }}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span><i class="fas fa-shield-alt me-2 text-primary"></i>نوع الحساب</span>
+                                    <span class="badge bg-{{ 'primary' if is_admin else 'secondary' }}">
+                                        {{ 'مدير' if is_admin else 'مستخدم' }}
+                                    </span>
+                                </li>
+                            </ul>
+                            
+                            <div class="mt-4">
+                                <a href="{{ url_for('teacher_logout') }}" class="btn btn-outline-danger w-100">
+                                    <i class="fas fa-sign-out-alt me-2"></i>تسجيل الخروج
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if is_admin %}
+<script>
+function previewFile() {
+    const preview = document.getElementById('previewImage');
+    const file = document.getElementById('deptImage').files[0];
+    const badge = document.getElementById('newImageBadge');
+    
+    if (file) {
+        const reader = new FileReader();
+        reader.addEventListener('load', function () {
+            // تحديث الصورة بالـ preview الجديدة
+            preview.src = reader.result;
+            
+            // إزالة أي border أو خلفية شفافة
+            preview.style.background = 'white';
+            preview.style.objectFit = 'cover';
+            
+            // إظهار الـ badge
+            if (badge) {
+                badge.classList.remove('d-none');
+            }
+        }, false);
+        
+        reader.readAsDataURL(file);
+    }
+}
+
+function previewLogo() {
+    const preview = document.getElementById('previewLogo');
+    const file = document.getElementById('systemLogo').files[0];
+    const reader = new FileReader();
+
+    reader.addEventListener('load', function () {
+        preview.src = reader.result;
+    }, false);
+
+    if (file) {
+        reader.readAsDataURL(file);
+    }
+}
+
+function deleteUser(username) {
+    if (confirm('هل أنت متأكد من حذف المستخدم ' + username + '؟')) {
+        fetch('/delete-user/' + username, { method: 'DELETE' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.message);
+                }
+            });
+    }
+}
+</script>
+{% endif %}
+{% endblock %}

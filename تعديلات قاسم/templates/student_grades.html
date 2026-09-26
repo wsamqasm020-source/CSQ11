@@ -1,0 +1,722 @@
+{% extends 'base.html' %}
+
+{% block title %}إدارة درجات الطلاب - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2 class="text-white">
+            <i class="fas fa-star me-2"></i>إدارة درجات الطلاب
+        </h2>
+    </div>
+    <div class="col-md-4 text-md-start">
+        <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addGradeModal">
+            <i class="fas fa-plus me-2"></i>إضافة درجة
+        </button>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-4">
+        <div class="stats-card">
+            <i class="fas fa-users fa-3x text-primary mb-3"></i>
+            <div class="stats-number">{{ students|length }}</div>
+            <p class="text-muted mb-0">إجمالي الطلاب</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stats-card">
+            <i class="fas fa-key fa-3x text-success mb-3"></i>
+            <div class="stats-number" id="activeCodesCount">{{ codes|length }}</div>
+            <p class="text-muted mb-0">أكواد نشطة</p>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stats-card">
+            <i class="fas fa-graduation-cap fa-3x text-info mb-3"></i>
+            <div class="stats-number">{{ subjects|length }}</div>
+            <p class="text-muted mb-0">المواد الدراسية</p>
+        </div>
+    </div>
+</div>
+
+<!-- Access Codes Section -->
+<div class="card mb-4" id="codesCard">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-key me-2"></i>أكواد الوصول النشطة</h5>
+        <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-success btn-sm" onclick="exportCodesToExcel()">
+                <i class="fas fa-file-excel me-1"></i>تصدير Excel
+            </button>
+            <span class="badge bg-success">{{ codes|length }} كود</span>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if codes %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>اسم الطالب</th>
+                        <th>الرقم</th>
+                        <th>الكود</th>
+                        <th>تاريخ الانتهاء</th>
+                        <th>الحالة</th>
+                        <th>حذف</th>
+                    </tr>
+                </thead>
+                <tbody id="codesTableBody">
+                    {% for code in codes %}
+                    <tr id="code-row-{{ code.id }}" data-student-id="{{ code.student_id }}">
+                        <td>{{ loop.index }}</td>
+                        <td><strong>{{ code.student_name }}</strong></td>
+                        <td><span class="badge bg-primary">{{ code.student_code }}</span></td>
+                        <td><span class="badge bg-warning text-dark fs-6">{{ code.access_code }}</span></td>
+                        <td>{{ code.expires_at }}</td>
+                        <td><span class="badge bg-success">نشط</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-info text-white btn-view-grades" data-id="{{ code.student_id }}">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger btn-delete-code" data-id="{{ code.id }}" data-name="{{ code.student_name }}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4" id="codesEmpty" {% if codes %}style="display:none"{% endif %}>
+            <i class="fas fa-key fa-3x text-muted mb-3"></i>
+            <p class="text-muted">لا توجد أكواد نشطة</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Generate Code Section - مخفي لكن ضروري للـ JS -->
+<div class="d-none">
+    <input type="text" id="studentSearch" autocomplete="off">
+    <input type="hidden" id="studentSelect">
+    <div id="studentDropdown">
+        {% for student in students %}
+        <button type="button" class="student-option"
+            data-id="{{ student.id }}"
+            data-name="{{ student.full_name }}"
+            data-label="{{ student.full_name }} ({{ student.student_code }}) - {{ student.teacher_name }}">
+        </button>
+        {% endfor %}
+    </div>
+    <div id="generatedCodeResult"><strong id="generatedCode"></strong></div>
+</div>
+
+<!-- Students List -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-users me-2"></i>قائمة الطلاب</h5>
+    </div>
+    <!-- Search & Filter Bar -->
+    <div class="card-body border-bottom pb-3">
+        <div class="row g-2">
+            <div class="col-md-5">
+                <input type="text" id="searchInput" class="form-control" placeholder="🔍 بحث بالاسم أو الرقم...">
+            </div>
+            <div class="col-md-3">
+                <select id="filterTeacher" class="form-select">
+                    <option value="">كل المراحل</option>
+                    <option value="الأولى">الأولى</option>
+                    <option value="الثانية">الثانية</option>
+                    <option value="الثالثة">الثالثة</option>
+                    <option value="الرابعة">الرابعة</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select id="filterGroup" class="form-select">
+                    <option value="">كل أنواع الدراسة</option>
+                    {% set groups = [] %}
+                    {% for student in students %}
+                        {% if student.group_name not in groups %}
+                            {% set _ = groups.append(student.group_name) %}
+                            <option value="{{ student.group_name }}">{{ student.group_name }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-outline-secondary w-100" onclick="resetFilters()" title="إعادة تعيين">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        <small class="text-muted mt-1 d-block">إجمالي: <span id="visibleCount">{{ students|length }}</span> طالب</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="studentsTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>الرقم</th>
+                        <th>الاسم</th>
+                        <th>المرحلة</th>
+                        <th>نوع الدراسة</th>
+                        <th>الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for student in students %}
+                    <tr data-name="{{ student.full_name }}" data-code="{{ student.student_code }}" data-teacher="{{ student.teacher_name }}" data-group="{{ student.group_name }}">
+                        <td>{{ loop.index }}</td>
+                        <td><span class="badge bg-primary">{{ student.student_code }}</span></td>
+                        <td><strong>{{ student.full_name }}</strong></td>
+                        <td><span class="badge bg-info">{{ student.teacher_name }}</span></td>
+                        <td><span class="badge bg-warning text-dark">{{ student.group_name }}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-success btn-gen-code" data-id="{{ student.id }}">
+                                <i class="fas fa-key"></i> كود
+                            </button>
+                            <button class="btn btn-sm btn-primary btn-view-grades" data-id="{{ student.id }}">
+                                <i class="fas fa-eye"></i> درجات
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4">
+                            <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">لا يوجد طلاب مسجلين</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Grade Modal -->
+<div class="modal fade" id="addGradeModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-plus-circle me-2"></i>إضافة درجة</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- اختيار الطالب مرة وحدة -->
+                <div class="mb-3">
+                    <label class="form-label">الطالب</label>
+                    <select class="form-select" id="gradeStudent" required>
+                        <option value="" selected disabled>اختر الطالب...</option>
+                        {% for code in codes %}
+                        <option value="{{ code.student_id }}">{{ code.student_name }} ({{ code.student_code }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- قائمة المواد والدرجات -->
+                <div id="gradesRows">
+                    <!-- الصف الأول -->
+                    <div class="grade-row mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-muted">مادة 1</small>
+                            <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row" style="display:none">
+                                <i class="fas fa-times me-1"></i>حذف
+                            </button>
+                        </div>
+                        <div class="border rounded p-2">
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <label class="form-label small">المادة</label>
+                                <select class="form-select form-select-sm row-subject" required>
+                                    <option value="" selected disabled>اختر المادة...</option>
+                                    {% for subject in subjects %}
+                                    <option value="{{ subject.id }}">{{ subject.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">الدرجة</label>
+                                <input type="number" class="form-control form-control-sm row-grade" min="0" max="100" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">العظمى</label>
+                                <input type="number" class="form-control form-control-sm row-max" value="100" min="1" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">النوع</label>
+                                <select class="form-select form-select-sm row-type">
+                                    <option value="نهائي">نهائي</option>
+                                    <option value="نصفي">نصفي</option>
+                                    <option value="شهري">شهري</option>
+                                    <option value="عملي">عملي</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label small">ملاحظات</label>
+                                <input type="text" class="form-control form-control-sm row-notes">
+                            </div>
+                        </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-outline-primary btn-sm mt-1" onclick="addGradeRow()">
+                    <i class="fas fa-plus me-1"></i>إضافة مادة أخرى
+                </button>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="button" class="btn btn-primary" onclick="addGrade()">
+                    <i class="fas fa-save me-2"></i>حفظ الكل
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- View Grades Modal -->
+<div class="modal fade" id="viewGradesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="fas fa-star me-2"></i>درجات الطالب</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="gradesContent">
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2">جاري التحميل...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentStudentId = null;
+
+// Event delegation للأزرار
+document.addEventListener('click', function(e) {
+    const genBtn = e.target.closest('.btn-gen-code');
+    const gradeBtn = e.target.closest('.btn-view-grades');
+    const delBtn = e.target.closest('.btn-delete-code');
+    if (genBtn) quickGenerateCode(genBtn.dataset.id);
+    if (gradeBtn) viewGrades(gradeBtn.dataset.id);
+    if (delBtn) deleteCode(delBtn.dataset.id, delBtn.dataset.name);
+});
+
+function exportCodesToExcel() {
+    const rows = document.querySelectorAll('#codesTableBody tr[data-student-id]');
+    if (rows.length === 0) {
+        Swal.mixin({ toast: true, position: 'top', showConfirmButton: false, timer: 2000 })
+            .fire({ icon: 'warning', title: 'لا توجد أكواد للتصدير' });
+        return;
+    }
+    let csv = '\uFEFF#,اسم الطالب,الرقم,الكود\n';
+    rows.forEach((row, i) => {
+        const cells = row.querySelectorAll('td');
+        const name = cells[1]?.innerText.trim() || '';
+        const code_num = cells[2]?.innerText.trim() || '';
+        const access = cells[3]?.innerText.trim() || '';
+        csv += `${i + 1},"${name}","${code_num}","${access}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `access_codes_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+}
+
+function updateCodesCount(delta) {
+    const tbody = document.querySelector('#codesTableBody');
+    const count = tbody ? tbody.querySelectorAll('tr[data-student-id]').length : 0;
+    // بطاقة الإحصاء
+    const statNum = document.getElementById('activeCodesCount');
+    if (statNum) statNum.textContent = count;
+    // badge في header الجدول
+    const badge = document.querySelector('#codesCard .badge');
+    if (badge) badge.textContent = `${count} كود`;
+    // إظهار/إخفاء رسالة "لا توجد أكواد"
+    const empty = document.getElementById('codesEmpty');
+    if (empty) empty.style.display = count === 0 ? 'block' : 'none';
+    if (tbody) tbody.closest('.table-responsive').style.display = count === 0 ? 'none' : 'block';
+}
+
+function addCodeRowToTable(data) {
+    const tbody = document.querySelector('#codesTableBody');
+    if (!tbody) return;
+
+    // احذف الصف القديم لنفس الطالب إن وجد
+    const existing = tbody.querySelector(`tr[data-student-id="${data.student_id}"]`);
+    if (existing) existing.remove();
+
+    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleString('ar-IQ');
+    const newId = 'new-' + Date.now();
+    const tr = document.createElement('tr');
+    tr.id = `code-row-${newId}`;
+    tr.dataset.studentId = data.student_id;
+    tr.innerHTML = `
+        <td>${tbody.querySelectorAll('tr').length + 1}</td>
+        <td><strong>${data.student_name}</strong></td>
+        <td><span class="badge bg-primary">${data.student_code}</span></td>
+        <td><span class="badge bg-warning text-dark fs-6">${data.code}</span></td>
+        <td>${expires}</td>
+        <td><span class="badge bg-success">نشط</span></td>
+        <td>
+            <button class="btn btn-sm btn-info text-white btn-view-grades" data-id="${data.student_id}">
+                <i class="fas fa-eye"></i>
+            </button>
+            <button class="btn btn-sm btn-danger btn-delete-code" data-id="${newId}" data-name="${data.student_name}">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>`;
+    tbody.prepend(tr);
+    updateCodesCount();
+}
+
+async function deleteCode(codeId, studentName) {
+    const result = await Swal.fire({
+        icon: 'warning', title: 'حذف الكود',
+        text: `هل تريد حذف كود ${studentName}؟`,
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545', cancelButtonColor: '#6c757d',
+        confirmButtonText: 'حذف', cancelButtonText: 'إلغاء'
+    });
+    if (!result.isConfirmed) return;
+
+    const response = await fetch(`/api/access-code/${codeId}/delete`, { method: 'DELETE' });
+    const data = await response.json();
+    if (data.success) {
+        document.getElementById(`code-row-${codeId}`)?.remove();
+        updateCodesCount();
+        const Toast = Swal.mixin({ toast: true, position: 'top', showConfirmButton: false, timer: 1500 });
+        Toast.fire({ icon: 'success', title: 'تم حذف الكود والدرجات' });
+    } else {
+        Swal.fire({ icon: 'error', title: 'خطأ', text: data.message });
+    }
+}
+
+// البحث والفلترة
+function filterTable() {
+    const search = document.getElementById('searchInput').value.trim().toLowerCase();
+    const teacher = document.getElementById('filterTeacher').value;
+    const group = document.getElementById('filterGroup').value;
+    const rows = document.querySelectorAll('#studentsTable tbody tr[data-name]');
+    let visible = 0;
+    rows.forEach(row => {
+        const name = row.dataset.name.toLowerCase();
+        const code = row.dataset.code.toLowerCase();
+        const show = (!search || name.includes(search) || code.includes(search))
+                  && (!teacher || row.dataset.teacher === teacher)
+                  && (!group || row.dataset.group === group);
+        row.style.display = show ? '' : 'none';
+        if (show) visible++;
+    });
+    document.getElementById('visibleCount').textContent = visible;
+}
+
+function resetFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('filterTeacher').value = '';
+    document.getElementById('filterGroup').value = '';
+    filterTable();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('searchInput').addEventListener('input', filterTable);
+    document.getElementById('filterTeacher').addEventListener('change', filterTable);
+    document.getElementById('filterGroup').addEventListener('change', filterTable);
+
+    // بحث الطالب في توليد الكود
+    const searchInput = document.getElementById('studentSearch');
+    const dropdown = document.getElementById('studentDropdown');
+    const options = dropdown.querySelectorAll('.student-option');
+
+    searchInput.addEventListener('input', function() {
+        const q = this.value.trim().toLowerCase();
+        document.getElementById('studentSelect').value = '';
+        let any = false;
+        options.forEach(opt => {
+            const match = opt.dataset.label.toLowerCase().includes(q);
+            opt.style.display = match ? '' : 'none';
+            if (match) any = true;
+        });
+        dropdown.style.display = (q && any) ? 'block' : 'none';
+    });
+
+    searchInput.addEventListener('focus', function() {
+        if (this.value.trim()) dropdown.style.display = 'block';
+    });
+
+    dropdown.addEventListener('click', function(e) {
+        const opt = e.target.closest('.student-option');
+        if (!opt) return;
+        document.getElementById('studentSelect').value = opt.dataset.id;
+        searchInput.value = opt.dataset.name;
+        dropdown.style.display = 'none';
+    });
+
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#studentSearch') && !e.target.closest('#studentDropdown')) {
+            dropdown.style.display = 'none';
+        }
+    });
+});
+
+async function generateCode() {
+    const studentId = document.getElementById('studentSelect').value;
+    
+    if (!studentId) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'تنبيه',
+            text: 'الرجاء اختيار الطالب أولاً',
+            confirmButtonColor: '#667eea'
+        });
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/student/${studentId}/generate-code`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('generatedCode').textContent = data.code;
+            document.getElementById('generatedCodeResult').classList.remove('d-none');
+
+            // أضف الصف فوراً في جدول الأكواد بدون refresh
+            addCodeRowToTable(data);
+
+            const Toast = Swal.mixin({
+                toast: true, position: 'top',
+                showConfirmButton: false, timer: 3000, timerProgressBar: true
+            });
+            Toast.fire({ icon: 'success', title: `الكود: ${data.code}` });
+        } else {
+            Swal.fire({
+                icon: 'error',
+                title: 'خطأ',
+                text: data.message,
+                confirmButtonColor: '#667eea'
+            });
+        }
+    } catch (error) {
+        Swal.fire({
+            icon: 'error',
+            title: 'خطأ',
+            text: 'حدث خطأ في الاتصال بالخادم',
+            confirmButtonColor: '#667eea'
+        });
+    }
+}
+
+function quickGenerateCode(studentId) {
+    // ابحث عن اسم الطالب من الـ dropdown
+    const opt = document.querySelector(`.student-option[data-id="${studentId}"]`);
+    if (opt) {
+        document.getElementById('studentSelect').value = studentId;
+        document.getElementById('studentSearch').value = opt.dataset.name;
+    }
+    generateCode();
+}
+
+function addGradeRow() {
+    const container = document.getElementById('gradesRows');
+    const subjectOptions = `{% for subject in subjects %}<option value="{{ subject.id }}">{{ subject.name }}</option>{% endfor %}`;
+    const row = document.createElement('div');
+    row.className = 'grade-row mb-2';
+    row.innerHTML = `
+        <div class="d-flex justify-content-between align-items-center mb-1">
+            <small class="text-muted">مادة جديدة</small>
+            <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row">
+                <i class="fas fa-times me-1"></i>حذف
+            </button>
+        </div>
+        <div class="border rounded p-2">
+        <div class="row g-2">
+            <div class="col-md-4">
+                <label class="form-label small">المادة</label>
+                <select class="form-select form-select-sm row-subject" required>
+                    <option value="" selected disabled>اختر المادة...</option>
+                    ${subjectOptions}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">الدرجة</label>
+                <input type="number" class="form-control form-control-sm row-grade" min="0" max="100" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">العظمى</label>
+                <input type="number" class="form-control form-control-sm row-max" value="100" min="1" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">النوع</label>
+                <select class="form-select form-select-sm row-type">
+                    <option value="نهائي">نهائي</option>
+                    <option value="نصفي">نصفي</option>
+                    <option value="شهري">شهري</option>
+                    <option value="عملي">عملي</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">ملاحظات</label>
+                <input type="text" class="form-control form-control-sm row-notes">
+            </div>
+        </div>
+        </div>`;
+    container.appendChild(row);
+}
+
+// حذف صف
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.btn-remove-row')) {
+        e.target.closest('.grade-row').remove();
+    }
+});
+
+async function addGrade() {
+    const studentId = document.getElementById('gradeStudent').value;
+    if (!studentId) {
+        Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'اختر الطالب أولاً', confirmButtonColor: '#667eea' });
+        return;
+    }
+
+    const rows = document.querySelectorAll('.grade-row');
+    const grades = [];
+    let valid = true;
+
+    rows.forEach(row => {
+        const subjectId = row.querySelector('.row-subject').value;
+        const grade = row.querySelector('.row-grade').value;
+        const maxGrade = row.querySelector('.row-max').value;
+        const examType = row.querySelector('.row-type').value;
+        const notes = row.querySelector('.row-notes').value;
+        if (!subjectId || !grade) { valid = false; return; }
+        grades.push({ subject_id: parseInt(subjectId), grade: parseFloat(grade), max_grade: parseFloat(maxGrade), exam_type: examType, notes });
+    });
+
+    if (!valid || grades.length === 0) {
+        Swal.fire({ icon: 'warning', title: 'تنبيه', text: 'الرجاء ملء جميع الحقول المطلوبة', confirmButtonColor: '#667eea' });
+        return;
+    }
+
+    try {
+        // أرسل كل الدرجات
+        const results = await Promise.all(grades.map(g =>
+            fetch(`/api/student/${studentId}/add-grade`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(g)
+            }).then(r => r.json())
+        ));
+
+        const allOk = results.every(r => r.success);
+        bootstrap.Modal.getInstance(document.getElementById('addGradeModal')).hide();
+
+        // أعد تعيين الـ modal
+        document.getElementById('gradeStudent').value = '';
+        document.getElementById('gradesRows').innerHTML = '';
+        addGradeRow(); // أضف صف فارغ جديد
+
+        const Toast = Swal.mixin({ toast: true, position: 'top', showConfirmButton: false, timer: 2000 });
+        Toast.fire({ icon: allOk ? 'success' : 'warning', title: allOk ? `تم حفظ ${grades.length} درجة` : 'بعض الدرجات لم تُحفظ' });
+
+    } catch (error) {
+        Swal.fire({ icon: 'error', title: 'خطأ', text: 'حدث خطأ في الاتصال بالخادم', confirmButtonColor: '#667eea' });
+    }
+}
+async function viewGrades(studentId) {
+    currentStudentId = studentId;
+
+    document.getElementById('gradesContent').innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2">جاري التحميل...</p>
+        </div>`;
+
+    const modal = new bootstrap.Modal(document.getElementById('viewGradesModal'));
+    modal.show();
+
+    loadGrades(studentId);
+}
+
+async function loadGrades(studentId) {
+    try {
+        const response = await fetch(`/api/student/${studentId}/grades`);
+        const data = await response.json();
+
+        if (data.success && data.grades.length > 0) {
+            let html = `<div class="table-responsive"><table class="table table-hover">
+                <thead><tr><th>المادة</th><th>الأستاذ</th><th>الدرجة</th><th>النوع</th><th>ملاحظات</th><th>حذف</th></tr></thead><tbody>`;
+            data.grades.forEach(g => {
+                const pct = Math.round((g.grade / g.max_grade) * 100);
+                const cls = pct >= 50 ? 'success' : 'danger';
+                html += `<tr id="grade-row-${g.id}">
+                    <td>${g.subject_name}</td>
+                    <td>${g.teacher_name}</td>
+                    <td><span class="badge bg-${cls}">${g.grade}/${g.max_grade} (${pct}%)</span></td>
+                    <td>${g.exam_type}</td>
+                    <td>${g.notes || '-'}</td>
+                    <td><button class="btn btn-sm btn-danger btn-delete-grade" data-id="${g.id}" data-student="${studentId}">
+                        <i class="fas fa-trash"></i>
+                    </button></td>
+                </tr>`;
+            });
+            html += '</tbody></table></div>';
+            document.getElementById('gradesContent').innerHTML = html;
+        } else {
+            document.getElementById('gradesContent').innerHTML = `
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-star fa-3x mb-3"></i>
+                    <p>لا توجد درجات مسجلة لهذا الطالب</p>
+                </div>`;
+        }
+    } catch (error) {
+        document.getElementById('gradesContent').innerHTML = `
+            <div class="alert alert-danger">حدث خطأ في الاتصال بالخادم</div>`;
+    }
+}
+
+// حذف درجة
+document.addEventListener('click', async function(e) {
+    const btn = e.target.closest('.btn-delete-grade');
+    if (!btn) return;
+    const gradeId = btn.dataset.id;
+    const studentId = btn.dataset.student;
+
+    const result = await Swal.fire({
+        icon: 'warning', title: 'حذف الدرجة',
+        text: 'هل تريد حذف هذه الدرجة نهائياً؟',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545', cancelButtonColor: '#6c757d',
+        confirmButtonText: 'حذف', cancelButtonText: 'إلغاء'
+    });
+    if (!result.isConfirmed) return;
+
+    const res = await fetch(`/api/grade/${gradeId}/delete`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+        document.getElementById(`grade-row-${gradeId}`)?.remove();
+        const Toast = Swal.mixin({ toast: true, position: 'top', showConfirmButton: false, timer: 1500 });
+        Toast.fire({ icon: 'success', title: 'تم حذف الدرجة' });
+    } else {
+        Swal.fire({ icon: 'error', title: 'خطأ', text: data.message });
+    }
+});
+</script>
+{% endblock %}

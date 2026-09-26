@@ -1,0 +1,335 @@
+{% extends 'base.html' %}
+
+{% block title %}المواد الدراسية - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2 class="text-white">
+            <i class="fas fa-book me-2"></i>المواد الدراسية
+        </h2>
+    </div>
+    <div class="col-md-4 text-md-start">
+        <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#addSubjectModal">
+            <i class="fas fa-plus me-2"></i>إضافة مادة جديدة
+        </button>
+    </div>
+</div>
+
+<!-- Filter Section -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <input type="text" class="form-control" id="teacherFilter" placeholder="اسم الأستاذ..." onkeyup="filterSubjects()">
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" id="courseFilter" onchange="filterSubjects()">
+            <option value="">جميع الكورسات...</option>
+            <option value="أول">كورس أول</option>
+            <option value="ثاني">كورس ثاني</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" id="gradeFilter" onchange="filterSubjects()">
+            <option value="">جميع المراحل...</option>
+            <option value="الأولى">الأولى</option>
+            <option value="الثانية">الثانية</option>
+            <option value="الثالثة">الثالثة</option>
+            <option value="الرابعة">الرابعة</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <button class="btn btn-outline-light w-100" onclick="clearFilters()">
+            <i class="fas fa-undo me-2"></i>مسح الفلتر
+        </button>
+    </div>
+</div>
+
+<!-- Subjects Grid -->
+<div class="row g-4" id="subjectsGrid">
+    {% for subject in subjects %}
+    <div class="col-md-4 col-sm-6 subject-card" 
+         data-teacher="{{ subject.teacher_name }}"
+         data-grade="{{ subject.grade|default('الأولى') }}"
+         data-course="{{ subject.course_type|default(subject.department) }}">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="subject-icon">
+                        <i class="fas fa-book-open fa-2x text-primary"></i>
+                    </div>
+                    <span class="badge bg-info">{{ subject.grade|default('الأولى') }}</span>
+                </div>
+                <h5 class="card-title">{{ subject.name }}</h5>
+                <p class="text-muted mb-2">
+                    <i class="fas fa-chalkboard-teacher me-2"></i>أ. {{ subject.teacher_name }}
+                </p>
+                <p class="text-muted mb-0">
+                    <i class="fas fa-layer-group me-2"></i>كورس {{ subject.course_type|default(subject.department) }}
+                </p>
+            </div>
+            <div class="card-footer bg-transparent">
+                <a href="{{ url_for('attendance_page') }}" class="btn btn-sm btn-primary">
+                    <i class="fas fa-clipboard-list me-2"></i>سجل الحضور
+                </a>
+                <button class="btn btn-sm btn-danger float-start" onclick="deleteSubject('{{ subject.id }}', '{{ subject.name }}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-book fa-4x text-muted mb-3"></i>
+                <p class="text-muted">لا توجد مواد مسجلة</p>
+                <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addSubjectModal">
+                    <i class="fas fa-plus me-2"></i>إضافة مادة
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Statistics -->
+<div class="row mt-4">
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="totalSubjects">{{ subjects|length }}</div>
+            <p class="text-muted mb-0">إجمالي المواد</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="teacherCount">0</div>
+            <p class="text-muted mb-0">أساتذة</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="courseCount">0</div>
+            <p class="text-muted mb-0">كورسات</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="gradeCount">0</div>
+            <p class="text-muted mb-0">مراحل دراسية</p>
+        </div>
+    </div>
+</div>
+
+<!-- Add Subject Modal -->
+<div class="modal fade" id="addSubjectModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-plus-circle me-2"></i>إضافة مادة جديدة
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addSubjectForm">
+                    <div class="mb-3">
+                        <label for="subjectName" class="form-label">اسم المادة</label>
+                        <input type="text" class="form-control" id="subjectName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="subjectTeacher" class="form-label">اسم الأستاذ</label>
+                        <input type="text" class="form-control" id="subjectTeacher" required placeholder="أدخل اسم الأستاذ">
+                    </div>
+                    <div class="mb-3">
+                        <label for="subjectGrade" class="form-label">المرحلة الدراسية</label>
+                        <select class="form-select" id="subjectGrade" required>
+                            <option value="" selected disabled>اختر المرحلة الدراسية</option>
+                            <option value="الأولى">الأولى</option>
+                            <option value="الثانية">الثانية</option>
+                            <option value="الثالثة">الثالثة</option>
+                            <option value="الرابعة">الرابعة</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="subjectCourse" class="form-label">نوع الكورس</label>
+                        <select class="form-select" id="subjectCourse" required>
+                            <option value="" selected disabled>اختر نوع الكورس</option>
+                            <option value="أول">كورس أول</option>
+                            <option value="ثاني">كورس ثاني</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="button" class="btn btn-primary" onclick="addSubject()">
+                    <i class="fas fa-save me-2"></i>حفظ
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>تأكيد الحذف
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <i class="fas fa-trash-alt fa-4x text-danger mb-3"></i>
+                <p>هل أنت متأكد من حذف المادة <strong id="deleteSubjectName"></strong>؟</p>
+                <p class="text-muted">هذا الإجراء لا يمكن التراجع عنه.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="fas fa-trash me-2"></i>حذف
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let subjectToDelete = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateStats();
+});
+
+function updateStats() {
+    const cards = document.querySelectorAll('.subject-card');
+    const teachers = new Set();
+    const grades = new Set();
+    const courses = new Set();
+    
+    cards.forEach(card => {
+        teachers.add(card.getAttribute('data-teacher'));
+        grades.add(card.getAttribute('data-grade'));
+        courses.add(card.getAttribute('data-course'));
+    });
+    
+    document.getElementById('teacherCount').textContent = teachers.size;
+    document.getElementById('gradeCount').textContent = grades.size;
+    document.getElementById('courseCount').textContent = courses.size;
+}
+
+function filterSubjects() {
+    const teacherFilter = document.getElementById('teacherFilter').value.toLowerCase().trim();
+    const courseFilter = document.getElementById('courseFilter').value;
+    const gradeFilter = document.getElementById('gradeFilter').value;
+    
+    const cards = document.querySelectorAll('.subject-card');
+    let visibleCount = 0;
+    
+    cards.forEach(card => {
+        const teacher = (card.getAttribute('data-teacher') || '').toLowerCase().trim();
+        const course = card.getAttribute('data-course') || '';
+        const grade = card.getAttribute('data-grade') || '';
+        
+        const matchesTeacher = !teacherFilter || teacher.includes(teacherFilter);
+        const matchesCourse = !courseFilter || course === courseFilter;
+        const matchesGrade = !gradeFilter || grade === gradeFilter;
+        
+        if (matchesTeacher && matchesCourse && matchesGrade) {
+            card.style.display = '';
+            visibleCount++;
+        } else {
+            card.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('totalSubjects').textContent = visibleCount;
+}
+
+function clearFilters() {
+    document.getElementById('teacherFilter').value = '';
+    document.getElementById('courseFilter').value = '';
+    document.getElementById('gradeFilter').value = '';
+    
+    const cards = document.querySelectorAll('.subject-card');
+    cards.forEach(card => {
+        card.style.display = '';
+    });
+    
+    document.getElementById('totalSubjects').textContent = cards.length;
+}
+
+async function addSubject() {
+    const name = document.getElementById('subjectName').value.trim();
+    const teacherName = document.getElementById('subjectTeacher').value.trim();
+    const grade = document.getElementById('subjectGrade').value;
+    const courseType = document.getElementById('subjectCourse').value;
+    
+    if (!name || !teacherName || !grade || !courseType) {
+        alert('الرجاء ملء جميع الحقول');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/add-subject', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: name,
+                department: 'عام',
+                teacher_name: teacherName,
+                grade: grade,
+                course_type: courseType
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('addSubjectModal')).hide();
+            location.reload();
+        } else {
+            alert('حدث خطأ: ' + (data.message || 'حدث خطأ في إضافة المادة'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('حدث خطأ في الاتصال بالخادم');
+    }
+}
+
+function deleteSubject(id, name) {
+    subjectToDelete = id;
+    document.getElementById('deleteSubjectName').textContent = name;
+    
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+    if (!subjectToDelete) return;
+    
+    try {
+        const response = await fetch(`/api/delete-subject/${subjectToDelete}`, {
+            method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+            location.reload();
+        } else {
+            alert('حدث خطأ أثناء الحذف');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('حدث خطأ في الاتصال بالخادم');
+    }
+});
+</script>
+{% endblock %}

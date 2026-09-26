@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#667eea">
+    <title>غير متصل - نظام الحضور</title>
+    <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192x192.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+        
+        .offline-container {
+            text-align: center;
+            background: white;
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 450px;
+            width: 100%;
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .offline-icon {
+            font-size: 5rem;
+            margin-bottom: 1.5rem;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        
+        p {
+            color: #666;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+        
+        .status-box {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 1.5rem;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-left: 8px;
+            background-color: #dc3545;
+            animation: blink 1.5s infinite;
+        }
+        
+        .status-indicator.online {
+            background-color: #28a745;
+            animation: none;
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .btn-retry {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 14px 40px;
+            border-radius: 25px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+        }
+        
+        .btn-retry:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-home {
+            background: transparent;
+            border: 2px solid #667eea;
+            color: #667eea;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+            width: 100%;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-home:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .features-list {
+            margin-top: 1.5rem;
+            text-align: right;
+        }
+        
+        .features-list h4 {
+            color: #333;
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+        
+        .features-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .features-list li {
+            color: #666;
+            padding: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .features-list li::before {
+            content: '✓';
+            color: #28a745;
+            margin-left: 8px;
+            font-weight: bold;
+        }
+        
+        .features-list li.unavailable::before {
+            content: '✗';
+            color: #dc3545;
+        }
+        
+        @media (max-width: 576px) {
+            .offline-container {
+                padding: 2rem;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            .offline-icon {
+                font-size: 4rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-container">
+        <div class="offline-icon">📡</div>
+        <h1>أنت غير متصل بالإنترنت</h1>
+        <p>
+            لا يمكن الوصول إلى الخادم حالياً. يمكنك استخدام بعض الميزات المتاحة بدون إنترنت.
+        </p>
+        
+        <div class="status-box">
+            <span id="status-dot" class="status-indicator"></span>
+            <span id="status-text">جاري التحقق من الاتصال...</span>
+        </div>
+        
+        <button class="btn-retry" onclick="checkConnection()">
+            <span id="retry-text">إعادة المحاولة</span>
+        </button>
+        
+        <a href="/" class="btn-home">الذهاب للصفحة الرئيسية</a>
+        
+        <div class="features-list">
+            <h4>الميزات المتاحة:</h4>
+            <ul>
+                <li>الصفحة الرئيسية</li>
+                <li>صفحة تسجيل الدخول</li>
+                <li>عرض البيانات المخزنة مسبقاً</li>
+                <li class="unavailable">مسح QR (يتطلب اتصالاً)</li>
+                <li class="unavailable">تسجيل حضور جديد (يتطلب اتصالاً)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/static/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Check online status
+        function updateOnlineStatus() {
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            const retryText = document.getElementById('retry-text');
+            
+            if (navigator.onLine) {
+                dot.classList.add('online');
+                text.textContent = 'متصل! جاري التحقق من الخادم...';
+                retryText.textContent = 'تحديث الصفحة';
+                
+                // Try to ping the server
+                fetch('/', { method: 'HEAD', cache: 'no-cache' })
+                    .then(() => {
+                        text.textContent = 'متصل بالخادم!';
+                        setTimeout(() => {
+                            window.location.href = '/';
+                        }, 1000);
+                    })
+                    .catch(() => {
+                        text.textContent = 'متصل بالإنترنت لكن الخادم غير متاح';
+                    });
+            } else {
+                dot.classList.remove('online');
+                text.textContent = 'غير متصل بالإنترنت';
+                retryText.textContent = 'إعادة المحاولة';
+            }
+        }
+        
+        function checkConnection() {
+            const btn = document.querySelector('.btn-retry');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>جاري التحقق...';
+            
+            updateOnlineStatus();
+            
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<span id="retry-text">إعادة المحاولة</span>';
+            }, 2000);
+        }
+        
+        // Listen for network changes
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        
+        // Initial check
+        updateOnlineStatus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>الإعدادات - {{ student.full_name }}</title>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        * {
+            font-family: 'Cairo', sans-serif;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+        
+        /* Header */
+        .settings-header {
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .settings-header h1 {
+            color: white;
+            font-size: 1.3rem;
+            font-weight: 700;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .back-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+            color: white;
+        }
+        
+        /* Container */
+        .settings-container {
+            max-width: 700px;
+            margin: 25px auto;
+            padding: 0 15px;
+        }
+        
+        /* Card */
+        .settings-card {
+            background: white;
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        }
+        
+        .card-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #11998e;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        /* Profile Picture */
+        .profile-pic-section {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .profile-pic-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .profile-pic {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 4px solid #11998e;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            font-weight: 700;
+            box-shadow: 0 5px 20px rgba(17,153,142,0.3);
+        }
+        
+        .profile-pic-overlay {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            background: #11998e;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+        }
+        
+        .profile-pic-overlay:hover {
+            background: #0d7a6f;
+            transform: scale(1.1);
+        }
+        
+        .profile-pic-overlay input {
+            display: none;
+        }
+        
+        .student-name {
+            margin-top: 15px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #333;
+        }
+        
+        .student-id {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        
+        /* Form */
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .form-control {
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 12px 15px;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+        
+        .form-control:focus {
+            border-color: #11998e;
+            box-shadow: 0 0 0 0.2rem rgba(17,153,142,0.25);
+        }
+        
+        /* Buttons */
+        .btn-save {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-weight: 700;
+            width: 100%;
+            transition: all 0.3s;
+            box-shadow: 0 5px 15px rgba(17,153,142,0.3);
+        }
+        
+        .btn-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(17,153,142,0.4);
+        }
+        
+        .btn-logout {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 10px;
+            font-weight: 700;
+            width: 100%;
+            transition: all 0.3s;
+            box-shadow: 0 5px 15px rgba(235,51,73,0.3);
+        }
+        
+        .btn-logout:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(235,51,73,0.4);
+        }
+        
+        /* Info Card */
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .info-item:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            color: #666;
+            font-weight: 600;
+        }
+        
+        .info-value {
+            color: #333;
+            font-weight: 600;
+        }
+        
+        /* Alert */
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="settings-header">
+        <h1>
+            <i class="fas fa-cog"></i>
+            الإعدادات
+        </h1>
+        <a href="{{ url_for('student_dashboard') }}" class="back-btn">
+            <i class="fas fa-arrow-right"></i>
+            رجوع
+        </a>
+    </div>
+    
+    <!-- Container -->
+    <div class="settings-container">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'success' }}">
+                        <i class="fas fa-{{ 'check-circle' if category == 'success' else 'exclamation-circle' }} me-2"></i>
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <!-- Profile Card -->
+        <div class="settings-card">
+            <h2 class="card-title">
+                <i class="fas fa-user-circle"></i>
+                الملف الشخصي
+            </h2>
+            
+            <form method="POST" action="{{ url_for('student_update_profile') }}" enctype="multipart/form-data">
+                <div class="profile-pic-section">
+                    <div class="profile-pic-wrapper">
+                        <div class="profile-pic" id="profilePicPreview">
+                            {% if student.profile_image %}
+                                <img src="{{ student.profile_image }}" alt="صورة الملف الشخصي" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">
+                            {% else %}
+                                {{ student.full_name[0] }}
+                            {% endif %}
+                        </div>
+                        <label class="profile-pic-overlay" for="profilePicInput">
+                            <i class="fas fa-camera"></i>
+                            <input type="file" id="profilePicInput" name="profile_image" accept="image/*" onchange="previewProfilePic(this)">
+                        </label>
+                    </div>
+                    <div class="student-name">{{ student.full_name }}</div>
+                    <div class="student-id">الرقم الجامعي: {{ student.student_code }}</div>
+                </div>
+                
+                <button type="submit" class="btn-save">
+                    <i class="fas fa-save me-2"></i>
+                    حفظ الصورة
+                </button>
+            </form>
+        </div>
+        
+        <!-- Password Card -->
+        <div class="settings-card">
+            <h2 class="card-title">
+                <i class="fas fa-lock"></i>
+                تغيير كلمة المرور
+            </h2>
+            
+            <form method="POST" action="{{ url_for('student_change_password') }}">
+                <div class="form-group">
+                    <label class="form-label">
+                        <i class="fas fa-lock"></i>
+                        كلمة المرور الجديدة
+                    </label>
+                    <input type="password" class="form-control" name="new_password" placeholder="أدخل كلمة المرور الجديدة" required minlength="6">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">
+                        <i class="fas fa-lock"></i>
+                        تأكيد كلمة المرور الجديدة
+                    </label>
+                    <input type="password" class="form-control" name="confirm_password" placeholder="أعد إدخال كلمة المرور الجديدة" required>
+                </div>
+                
+                <button type="submit" class="btn-save">
+                    <i class="fas fa-check me-2"></i>
+                    تحديث كلمة المرور
+                </button>
+            </form>
+        </div>
+        
+        <!-- Info Card -->
+        <div class="settings-card">
+            <h2 class="card-title">
+                <i class="fas fa-info-circle"></i>
+                معلومات الحساب
+            </h2>
+            
+            <div class="info-item">
+                <span class="info-label">الاسم الكامل</span>
+                <span class="info-value">{{ student.full_name }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">الرقم الجامعي</span>
+                <span class="info-value">{{ student.student_code }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">القسم</span>
+                <span class="info-value">{{ student.department or 'غير محدد' }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">المرحلة</span>
+                <span class="info-value">{{ student.teacher_name }}</span>
+            </div>
+            
+            <div class="info-item">
+                <span class="info-label">الدراسة</span>
+                <span class="info-value">{{ student.group_name }}</span>
+            </div>
+        </div>
+        
+        <!-- Logout Card -->
+        <div class="settings-card">
+            <button onclick="confirmLogout()" class="btn-logout">
+                <i class="fas fa-sign-out-alt me-2"></i>
+                تسجيل الخروج
+            </button>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Preview profile picture
+        function previewProfilePic(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('profilePicPreview').innerHTML = 
+                        '<img src="' + e.target.result + '" alt="صورة الملف الشخصي" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">';
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+        
+        // Confirm logout
+        function confirmLogout() {
+            if (confirm('هل أنت متأكد من تسجيل الخروج؟')) {
+                window.location.href = '{{ url_for("student_logout") }}';
+            }
+        }
+    </script>
+</body>
+</html>

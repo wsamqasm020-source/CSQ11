@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+
+{% block title %}الرئيسية - نظام تسجيل الحضور بالـ QR{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="row justify-content-center mb-5">
+    <div class="col-lg-8 text-center text-white">
+        <h1 class="display-4 fw-bold mb-4">
+            <i class="fas fa-qrcode me-3"></i>نظام تسجيل الحضور الذكي
+        </h1>
+        <p class="lead mb-4">
+            نظام متكامل لتوليد QR codes للطلاب وتسجيل الحضور بسهولة وسرعة
+        </p>
+        <div class="d-flex justify-content-center gap-3 flex-wrap">
+            <a href="{{ url_for('generate_page') }}" class="btn btn-light btn-lg px-4">
+                <i class="fas fa-plus-circle me-2"></i>توليد QR جديد
+            </a>
+            <a href="{{ url_for('scanner_page') }}" class="btn btn-success btn-lg px-4">
+                <i class="fas fa-camera me-2"></i>فتح الماسح
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Section -->
+<div class="row g-4 mb-5">
+    <div class="col-md-3 col-sm-6">
+        <div class="stats-card">
+            <i class="fas fa-users fa-3x text-primary mb-3"></i>
+            <div class="stats-number" id="totalStudents">0</div>
+            <p class="text-muted mb-0">إجمالي الطلاب</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="stats-card">
+            <i class="fas fa-book fa-3x text-success mb-3"></i>
+            <div class="stats-number" id="totalSubjects">0</div>
+            <p class="text-muted mb-0">إجمالي المواد</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="stats-card">
+            <i class="fas fa-chalkboard-teacher fa-3x text-info mb-3"></i>
+            <div class="stats-number" id="totalTeachers">0</div>
+            <p class="text-muted mb-0">إجمالي الأساتذة</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+        <div class="stats-card">
+            <i class="fas fa-qrcode fa-3x text-warning mb-3"></i>
+            <div class="stats-number" id="todayAttendance">0</div>
+            <p class="text-muted mb-0">حضور اليوم</p>
+        </div>
+    </div>
+</div>
+
+<!-- Features Section -->
+<div class="row g-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center p-4">
+                <div class="mb-4">
+                    <i class="fas fa-qrcode fa-4x text-primary"></i>
+                </div>
+                <h4 class="card-title mb-3">توليد QR Code</h4>
+                <p class="card-text text-muted">
+                    قم بتوليد  QR code فريد لكل طالب     
+                </p>
+                <a href="{{ url_for('generate_page') }}" class="btn btn-primary mt-3">
+                    <i class="fas fa-arrow-left me-2"></i>ابدأ الآن
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center p-4">
+                <div class="mb-4">
+                    <i class="fas fa-camera fa-4x text-success"></i>
+                </div>
+                <h4 class="card-title mb-3">ماسح QR</h4>
+                <p class="card-text text-muted">
+                    امسح QR code الطالب لتسجيل حضوره في المادة المحددة فوراً
+                </p>
+                <a href="{{ url_for('scanner_page') }}" class="btn btn-success mt-3">
+                    <i class="fas fa-arrow-left me-2"></i>افتح الماسح
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center p-4">
+                <div class="mb-4">
+                    <i class="fas fa-chart-bar fa-4x text-info"></i>
+                </div>
+                <h4 class="card-title mb-3">سجل الحضور</h4>
+                <p class="card-text text-muted">
+                    تابع سجل الحضور اليومي مع اسم الأستاذ والكروب لكل مادة
+                </p>
+                <a href="{{ url_for('attendance_page') }}" class="btn btn-info text-white mt-3">
+                    <i class="fas fa-arrow-left me-2"></i>عرض السجل
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Info Section -->
+<!-- Info Section -->
+<div class="row mt-5">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-info-circle me-2"></i>معلومات النظام</h4>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 justify-content-end">
+                    <!-- توليد بطاقات الطلاب -->
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center p-3 bg-light rounded">
+                            <i class="fas fa-user-plus fa-2x text-primary" style="margin-left: 20px;"></i>
+                            <div>
+                                <h6 class="mb-1">توليد بطاقات الطلاب</h6>
+                                <p class="mb-0 text-muted small">أدخل بيانات الطالب (الاسم، المرحلة، نوع الدراسة) واحصل على QR Code فوري</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- تسجيل الحضور -->
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center p-3 bg-light rounded">
+                            <i class="fas fa-clipboard-check fa-2x text-success" style="margin-left: 20px;"></i>
+                            <div>
+                                <h6 class="mb-1">تسجيل الحضور</h6>
+                                <p class="mb-0 text-muted small">استخدم كاميرا الجهاز لمسح QR Code وتسجيل حضور الطالب تلقائياً</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- إدارة الأساتذة -->
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center p-3 bg-light rounded">
+                            <i class="fas fa-chalkboard-teacher fa-2x text-info" style="margin-left: 20px;"></i>
+                            <div>
+                                <h6 class="mb-1">إدارة الأساتذة</h6>
+                                <p class="mb-0 text-muted small">كل مادة مرتبطة بأستاذ محدد ويظهر اسم الأستاذ في QR Code</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- إدارة المراحل -->
+                    <div class="col-md-6">
+                        <div class="d-flex align-items-center p-3 bg-light rounded">
+                            <i class="fas fa-users fa-2x text-warning" style="margin-left: 20px;"></i>
+                            <div>
+                                <h6 class="mb-1">إدارة المراحل</h6>
+                                <p class="mb-0 text-muted small">تنظيم الطلاب في مراحل مع تتبع حضور كل مرحلة</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+});
+
+async function loadStats() {
+    try {
+        // Get all students
+        const studentsResponse = await fetch('/api/get-students');
+        const studentsData = await studentsResponse.json();
+        
+        if (studentsData.success) {
+            document.getElementById('totalStudents').textContent = studentsData.students.length;
+        } else {
+            document.getElementById('totalStudents').textContent = '0';
+        }
+        
+        // Get subjects
+        const subjectsResponse = await fetch('/api/get-subjects');
+        const subjectsData = await subjectsResponse.json();
+        
+        if (subjectsData.success) {
+            document.getElementById('totalSubjects').textContent = subjectsData.subjects.length;
+            
+            // Count unique teachers
+            const teachers = new Set(subjectsData.subjects.map(s => s.teacher_name));
+            document.getElementById('totalTeachers').textContent = teachers.size;
+        }
+        
+        // Get today's attendance
+        const today = new Date().toISOString().split('T')[0];
+        let todayCount = 0;
+        
+        if (subjectsData.success) {
+            for (const subject of subjectsData.subjects) {
+                const attendanceResponse = await fetch(`/api/attendance/${subject.id}?date=${today}`);
+                const attendanceData = await attendanceResponse.json();
+                if (attendanceData.success) {
+                   todayCount += attendanceData.count_in_request_date || 0;
+                }
+            }
+        }
+        document.getElementById('todayAttendance').textContent = todayCount;
+        
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,410 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ student.full_name }} - تفاصيل الطالب{% endblock %}
+
+{% block content %}
+<!-- Back Button -->
+<div class="row mb-4">
+    <div class="col-12">
+        <a href="{{ url_for('students_page') }}" class="btn btn-light">
+            <i class="fas fa-arrow-right me-2"></i>العودة للقائمة
+        </a>
+    </div>
+</div>
+
+<div class="row g-4 justify-content-center align-items-start">
+    
+    <!-- اليمين: معلومات الطالب -->
+    <div class="col-md-4">
+        <div class="student-card">
+            <div class="student-avatar">
+                <i class="fas fa-user-graduate"></i>
+            </div>
+            <h3 class="mb-2">{{ student.full_name }}</h3>
+            <p class="text-muted mb-4">{{ student.student_code }}</p>
+            <div class="text-start">
+                <p><i class="fas fa-building me-2 text-primary"></i>
+                   <strong>القسم:</strong> {{ student.department }}</p>
+                <p><i class="fas fa-graduation-cap me-2 text-success"></i>
+                   <strong>المرحلة الدراسية:</strong> {{ student.teacher_name }}</p>
+                <p><i class="fas fa-book-open me-2 text-info"></i>
+                   <strong>نوع الدراسة:</strong> {{ student.group_name }}</p>
+                <p><i class="fas fa-calendar me-2 text-warning"></i>
+                   <strong>تاريخ الإضافة:</strong> {{ student.created_at }}</p>
+            </div>
+            <div class="mt-4">
+                <button class="btn btn-danger" onclick="deleteStudent('{{ student.id }}')">
+                    <i class="fas fa-trash me-2"></i>حذف الطالب
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- اليسار: QR Code -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header text-center">
+                <h5 class="mb-0"><i class="fas fa-qrcode me-2"></i>QR Code</h5>
+            </div>
+            <div class="card-body text-center">
+                <div class="qr-container">
+                    <img src="{{ qr_code }}" alt="QR Code" class="img-fluid" style="background:#fff;padding:8px;border-radius:8px;">
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-success btn-sm" onclick="downloadQR()">
+                        <i class="fas fa-download me-2"></i>تحميل
+                    </button>
+                    <button class="btn btn-info btn-sm text-white" onclick="printCard()">
+                        <i class="fas fa-print me-2"></i>طباعة
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-7 col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-clipboard-list me-2"></i>سجل الحضور</h5>
+            </div>
+            <div class="card-body">
+                {% if attendance %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>المادة</th>
+                                <th>المرحلة الدراسية</th>
+                                <th>نوع الدراسة</th>
+                                <th>التاريخ</th>
+                                <th>الحالة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for record in attendance %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ record.subject_name }}</td>
+                                <td><span class="badge bg-info">{{ record.teacher_name }}</span></td>
+                                <td><span class="badge bg-warning text-dark">{{ record.group_name }}</span></td>
+                                <td>{{ record.attendance_date }}</td>
+                                <td>
+                                    <span class="badge bg-success">
+                                        <i class="fas fa-check me-1"></i>حاضر
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Attendance Stats -->
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h4 class="text-primary">{{ attendance|length }}</h4>
+                                <p class="mb-0 text-muted">إجمالي مرات الحضور</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h4 class="text-success">{{ attendance|map(attribute='subject_name')|unique|list|length }}</h4>
+                                <p class="mb-0 text-muted">عدد المواد المسجلة</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-clipboard fa-4x text-muted mb-3"></i>
+                    <p class="text-muted">لا يوجد سجل حضور لهذا الطالب</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Attendance by Subject -->
+        {% if attendance %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>الحضور حسب المادة والأستاذ</h5>
+            </div>
+            <div class="card-body">
+                <div id="subjectStats"></div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Print Template (Hidden) -->
+<div id="printTemplate" class="d-none">
+    <div class="student-id-card">
+        <div class="card-header-print">
+            <h3>بطاقة الطالب</h3>
+        </div>
+        <div class="card-body-print">
+            <div class="qr-print">
+                <img id="printQR" src="" alt="QR Code">
+            </div>
+            <div class="info-print">
+                <p><strong>رقم الطالب:</strong> <span id="printCode"></span></p>
+                <p><strong>الاسم:</strong> <span id="printName"></span></p>
+                <p><strong>القسم:</strong> <span id="printDept"></span></p>
+                <p><strong>المرحلة:</strong> <span id="printTeacher"></span></p>
+                <p><strong>نوع الدراسة:</strong> <span id="printGroup"></span></p>
+            </div>
+        </div>
+        <div class="card-footer-print">
+            <p>نظام تسجيل الحضور QR © 2026</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.student-card {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.student-avatar {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 15px;
+    font-size: 2rem;
+    color: white;
+}
+
+.student-id-card {
+    width: 350px;
+    border: 2px solid #667eea;
+    border-radius: 15px;
+    overflow: hidden;
+    margin: 0 auto;
+    background: white;
+}
+
+.card-header-print {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    text-align: center;
+}
+
+.card-header-print h3 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.card-body-print {
+    padding: 20px;
+    text-align: center;
+}
+
+.qr-print img {
+    width: 150px;
+    height: 150px;
+    margin-bottom: 15px;
+}
+
+.info-print {
+    text-align: right;
+}
+
+.info-print p {
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.card-footer-print {
+    background: #f8f9fa;
+    padding: 10px;
+    text-align: center;
+    font-size: 12px;
+    color: #666;
+}
+
+@media print {
+    body * {
+        visibility: hidden;
+    }
+    #printTemplate, #printTemplate * {
+        visibility: visible;
+    }
+    #printTemplate {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+    }
+}
+
+.subject-stat {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #f8f9fa;
+    border-radius: 10px;
+}
+
+.subject-stat-name {
+    flex: 1;
+    font-weight: 600;
+}
+
+.subject-stat-bar {
+    flex: 2;
+    height: 20px;
+    background: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 0 10px;
+}
+
+.subject-stat-fill {
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    transition: width 0.5s ease;
+}
+
+.subject-stat-count {
+    font-weight: 700;
+    color: #667eea;
+}
+
+@media (min-width: 768px) {
+    .row.g-4 {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+    
+    .col-md-5 {
+        flex: 0 0 auto;
+        width: 40%;
+        min-width: 300px;
+    }
+    
+    .col-md-7 {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+}
+
+.container {
+    max-width: 1400px;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const studentData = JSON.parse('{{ student|tojson|safe }}');
+const attendanceData = JSON.parse('{{ attendance|tojson|safe }}');
+
+document.addEventListener('DOMContentLoaded', function() {
+    renderSubjectStats();
+});
+
+function renderSubjectStats() {
+    const container = document.getElementById('subjectStats');
+    if (!container || !attendanceData.length) return;
+    
+    const subjectCounts = {};
+    attendanceData.forEach(record => {
+        const key = `${record.subject_name} - ${record.teacher_name}`;
+        if (!subjectCounts[key]) {
+            subjectCounts[key] = {
+                count: 0,
+                subject: record.subject_name,
+                teacher: record.teacher_name
+            };
+        }
+        subjectCounts[key].count++;
+    });
+    
+    const maxCount = Math.max(...Object.values(subjectCounts).map(s => s.count));
+    
+    let html = '';
+    for (const [key, data] of Object.entries(subjectCounts)) {
+        const percentage = (data.count / maxCount) * 100;
+        html += `
+            <div class="subject-stat">
+                <span class="subject-stat-name">${data.subject} <small class="text-muted">- ${data.teacher}</small></span>
+                <div class="subject-stat-bar">
+                    <div class="subject-stat-fill" style="width: ${percentage}%"></div>
+                </div>
+                <span class="subject-stat-count">${data.count}</span>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function downloadQR() {
+    // ✅ نستخدم اسم الطالب من البيانات
+    const studentName = studentData.full_name;
+    
+    const cleanName = studentName
+        .replace(/\s+/g, '_')
+        .replace(/[^\w\u0621-\u064A]/g, '')
+        .substring(0, 30);
+    
+    const link = document.createElement('a');
+    link.download = `${cleanName}_QR.png`;
+    link.href = '{{ qr_code }}';
+    link.click();
+}
+
+function printCard() {
+    if (!studentData) return;
+
+    document.getElementById('printQR').src = '{{ qr_code }}';
+    document.getElementById('printCode').textContent = studentData.student_code;
+    document.getElementById('printName').textContent = studentData.full_name;
+    document.getElementById('printDept').textContent = studentData.department;
+    document.getElementById('printTeacher').textContent = studentData.teacher_name;
+    document.getElementById('printGroup').textContent = studentData.group_name;
+
+    window.print();
+}
+
+function deleteStudent(id) {
+    if (confirm('هل أنت متأكد من حذف هذا الطالب؟')) {
+        fetch(`/api/delete-student/${id}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = '{{ url_for("students_page") }}';
+            } else {
+                alert('حدث خطأ أثناء الحذف');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('حدث خطأ في الاتصال بالخادم');
+        });
+    }
+}
+</script>
+{% endblock %}

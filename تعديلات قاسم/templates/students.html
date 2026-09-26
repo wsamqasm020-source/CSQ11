@@ -1,0 +1,620 @@
+{% extends 'base.html' %}
+
+{% block title %}قائمة الطلاب - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2 class="text-white">
+            <i class="fas fa-users me-2"></i>قائمة الطلاب
+        </h2>
+    </div>
+    <div class="col-md-4 text-md-start d-flex gap-2 justify-content-end align-items-center">
+        <button class="btn btn-secondary btn-sm fw-bold text-nowrap" onclick="undoPromotion()" id="undoBtn" style="display:none; font-size:0.82rem;">
+            <i class="fas fa-undo me-1"></i>تراجع
+        </button>
+        <button class="btn btn-warning btn-sm fw-bold text-nowrap" onclick="openPromoteModal()" style="font-size:0.82rem;">
+            <i class="fas fa-level-up-alt me-1"></i>ترقية المرحلة
+        </button>
+        <a href="{{ url_for('generate_page') }}" class="btn btn-light btn-sm fw-bold text-nowrap" style="font-size:0.82rem;">
+            <i class="fas fa-plus me-1"></i>إضافة طالب
+        </a>
+    </div>
+</div>
+
+<!-- Search and Filter -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="input-group">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input type="text" class="form-control" id="searchInput" placeholder="بحث بالاسم أو الرقم...">
+        </div>
+    </div>
+
+    <!-- القسم العلمي -->
+    <div class="col-md-3">
+        <select class="form-select" id="deptFilter">
+            <option value="">القسم العلمي...</option>
+            <option value="الأمن السيبراني">الأمن السيبراني</option>
+        </select>
+    </div>
+
+    <!-- المرحلة الدراسية -->
+    <div class="col-md-3">
+        <select class="form-select" id="teacherFilter">
+            <option value="">المرحلة الدراسية...</option>
+            <option value="الأولى">الأولى</option>
+            <option value="الثانية">الثانية</option>
+            <option value="الثالثة">الثالثة</option>
+            <option value="الرابعة">الرابعة</option>
+        </select>
+    </div>
+
+    <!-- نوع الدراسة -->
+    <div class="col-md-3">
+        <select class="form-select" id="groupFilter">
+            <option value="">نوع الدراسة...</option>
+            <option value="صباحي">صباحي</option>
+            <option value="مسائي">مسائي</option>
+        </select>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12 text-center">
+        <button class="btn btn-outline-light" onclick="applyFilters()">
+            <i class="fas fa-filter me-2"></i>تطبيق الفلتر
+        </button>
+        <button class="btn btn-outline-light ms-2" onclick="clearFilters()">
+            <i class="fas fa-undo me-2"></i>مسح الفلتر
+        </button>
+    </div>
+</div>
+
+<!-- Students Table -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="studentsTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>رقم الطالب</th>
+                        <th>الاسم</th>
+                        <th>القسم</th>
+                        <th>المرحلة الدراسية</th>
+                        <th>نوع الدراسة</th>
+                        <th>تاريخ الإضافة</th>
+                        <th>الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for student in students %}
+                    <tr data-dept="{{ student.department }}" data-teacher="{{ student.teacher_name }}" data-group="{{ student.group_name }}">
+                        <td>{{ loop.index }}</td>
+                        <td><span class="badge bg-primary">{{ student.student_code }}</span></td>
+                        <td><strong>{{ student.full_name }}</strong></td>
+                        <td>{{ student.department }}</td>
+                        <td><span class="badge bg-info">{{ student.teacher_name }}</span></td>
+                        <td><span class="badge bg-warning text-dark">{{ student.group_name }}</span></td>
+                        <td>{{ student.created_at }}</td>
+                        <td>
+                            <div class="d-flex gap-1 justify-content-center">
+                                <a href="{{ url_for('student_detail', student_id=student.id) }}"
+                                   class="btn btn-sm text-white"
+                                   style="background: linear-gradient(135deg,#00c6ff,#0072ff); border:none; border-radius:10px; width:34px; height:34px; display:flex; align-items:center; justify-content:center;"
+                                   title="عرض التفاصيل">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <button class="btn btn-sm text-white"
+                                        style="background: linear-gradient(135deg,#f7971e,#ffd200); border:none; border-radius:10px; width:34px; height:34px; display:flex; align-items:center; justify-content:center;"
+                                        title="تعيين كلمة المرور"
+                                        onclick="resetStudentPassword('{{ student.id }}', '{{ student.full_name }}')">
+                                    <i class="fas fa-key" style="color:#333;"></i>
+                                </button>
+                                <button class="btn btn-sm text-white"
+                                        style="background: linear-gradient(135deg,#eb3349,#f45c43); border:none; border-radius:10px; width:34px; height:34px; display:flex; align-items:center; justify-content:center;"
+                                        title="حذف"
+                                        onclick="deleteStudent('{{ student.id }}', '{{ student.full_name }}')">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center py-5">
+                            <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">لا يوجد طلاب مسجلين</p>
+                            <a href="{{ url_for('generate_page') }}" class="btn btn-primary">
+                                <i class="fas fa-plus me-2"></i>إضافة طالب
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics -->
+<div class="row mt-4">
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="totalCount">{{ students|length }}</div>
+            <p class="text-muted mb-0">إجمالي الطلاب</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="deptCount">0</div>
+            <p class="text-muted mb-0">أقسام مختلفة</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="teacherCount">0</div>
+            <p class="text-muted mb-0">مراحل دراسية</p>
+        </div>
+    </div>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="stats-card">
+            <div class="stats-number" id="groupCount">0</div>
+            <p class="text-muted mb-0">أنواع دراسة</p>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>تأكيد الحذف
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center">
+                <i class="fas fa-trash-alt fa-4x text-danger mb-3"></i>
+                <p>هل أنت متأكد من حذف الطالب <strong id="deleteStudentName"></strong>؟</p>
+                <p class="text-muted">هذا الإجراء لا يمكن التراجع عنه.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="fas fa-trash me-2"></i>حذف
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal ترقية المرحلة الدراسية -->
+<div class="modal fade" id="promoteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0" style="border-radius:20px; overflow:hidden;">
+            <div class="modal-header border-0 text-white" style="background:linear-gradient(135deg,#f7971e,#ffd200); padding:20px 25px;">
+                <div>
+                    <h5 class="modal-title mb-1" style="color:#333;">
+                        <i class="fas fa-level-up-alt me-2"></i>ترقية المرحلة الدراسية
+                    </h5>
+                    <small style="color:#555;">تغيير مرحلة مجموعة من الطلاب دفعة واحدة</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-secondary">
+                        <i class="fas fa-arrow-right me-1"></i> من المرحلة
+                    </label>
+                    <select class="form-select" id="promoteFrom" style="border-radius:10px; border:2px solid #e0e0e0;">
+                        <option value="">-- اختر المرحلة الحالية --</option>
+                        <option value="الأولى">الأولى</option>
+                        <option value="الثانية">الثانية</option>
+                        <option value="الثالثة">الثالثة</option>
+                        <option value="الرابعة">الرابعة</option>
+                    </select>
+                </div>
+                <div class="text-center my-2">
+                    <i class="fas fa-arrow-down fa-2x text-warning"></i>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-secondary">
+                        <i class="fas fa-arrow-right me-1"></i> إلى المرحلة
+                    </label>
+                    <select class="form-select" id="promoteTo" style="border-radius:10px; border:2px solid #e0e0e0;">
+                        <option value="">-- اختر المرحلة الجديدة --</option>
+                        <option value="الأولى">الأولى</option>
+                        <option value="الثانية">الثانية</option>
+                        <option value="الثالثة">الثالثة</option>
+                        <option value="الرابعة">الرابعة</option>
+                    </select>
+                </div>
+                <div id="promotePreview" class="alert alert-info d-none py-2" style="border-radius:10px; font-size:0.9rem;">
+                    <i class="fas fa-info-circle me-1"></i>
+                    <span id="promotePreviewText"></span>
+                </div>
+                <div id="promoteError" class="alert alert-danger d-none py-2" style="border-radius:10px; font-size:0.88rem;">
+                    <i class="fas fa-exclamation-circle me-1"></i>
+                    <span id="promoteErrorText"></span>
+                </div>
+            </div>
+            <div class="modal-footer border-0 px-4 pb-4">
+                <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal"
+                        style="border-radius:10px; padding:10px 25px;">
+                    إلغاء
+                </button>
+                <button type="button" class="btn fw-bold text-dark" id="confirmPromoteBtn"
+                        style="background:linear-gradient(135deg,#f7971e,#ffd200); border:none; border-radius:10px; padding:10px 25px;">
+                    <i class="fas fa-check me-1"></i> تطبيق الترقية
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal تعيين كلمة مرور -->
+<div class="modal fade" id="passwordModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0" style="border-radius: 20px; overflow: hidden;">
+            <!-- Header -->
+            <div class="modal-header border-0 text-white" style="background: linear-gradient(135deg, #667eea, #764ba2); padding: 20px 25px;">
+                <div>
+                    <h5 class="modal-title mb-1">
+                        <i class="fas fa-key me-2"></i>تعيين كلمة مرور جديدة
+                    </h5>
+                    <small id="modalStudentName" style="opacity: 0.85;"></small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <!-- Body -->
+            <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-secondary">
+                        <i class="fas fa-lock me-1"></i> كلمة المرور الجديدة
+                    </label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="newPasswordInput"
+                               placeholder="أدخل كلمة المرور (6 أحرف على الأقل)"
+                               style="border-radius: 10px 0 0 10px; border: 2px solid #e0e0e0;">
+                        <button class="btn btn-outline-secondary" type="button"
+                                style="border-radius: 0 10px 10px 0; border: 2px solid #e0e0e0; border-right: none;"
+                                onclick="togglePassword('newPasswordInput', this)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-secondary">
+                        <i class="fas fa-lock me-1"></i> تأكيد كلمة المرور
+                    </label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="confirmPasswordInput"
+                               placeholder="أعد إدخال كلمة المرور"
+                               style="border-radius: 10px 0 0 10px; border: 2px solid #e0e0e0;">
+                        <button class="btn btn-outline-secondary" type="button"
+                                style="border-radius: 0 10px 10px 0; border: 2px solid #e0e0e0; border-right: none;"
+                                onclick="togglePassword('confirmPasswordInput', this)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="passwordError" class="alert alert-danger d-none py-2" style="border-radius: 10px; font-size: 0.88rem;">
+                    <i class="fas fa-exclamation-circle me-1"></i>
+                    <span id="passwordErrorText"></span>
+                </div>
+            </div>
+            <!-- Footer -->
+            <div class="modal-footer border-0 px-4 pb-4">
+                <button type="button" class="btn btn-light fw-bold" data-bs-dismiss="modal"
+                        style="border-radius: 10px; padding: 10px 25px;">
+                    إلغاء
+                </button>
+                <button type="button" class="btn text-white fw-bold" id="confirmPasswordBtn"
+                        style="background: linear-gradient(135deg, #667eea, #764ba2); border:none; border-radius: 10px; padding: 10px 25px;">
+                    <i class="fas fa-check me-1"></i> حفظ كلمة المرور
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let studentToDelete = null;
+let currentStudentId = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateStats();
+
+    // تحقق من وجود سجل ترقية لإظهار زر التراجع
+    fetch('/api/check-promotion-log')
+    .then(r => r.json())
+    .then(data => {
+        if (data.has_log) {
+            const btn = document.getElementById('undoBtn');
+            btn.style.removeProperty('display');
+            btn.title = `التراجع عن: ${data.from_grade} → ${data.to_grade}`;
+        }
+    })
+    .catch(() => {});
+
+    // زر حفظ كلمة المرور
+    document.getElementById('confirmPasswordBtn').addEventListener('click', function() {
+        const newPassword = document.getElementById('newPasswordInput').value.trim();
+        const confirmPassword = document.getElementById('confirmPasswordInput').value.trim();
+        const errorDiv = document.getElementById('passwordError');
+        const errorText = document.getElementById('passwordErrorText');
+
+        if (!newPassword || newPassword.length < 6) {
+            errorText.textContent = 'يجب أن تكون كلمة المرور 6 أحرف على الأقل!';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            errorText.textContent = 'كلمة المرور غير متطابقة!';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+        errorDiv.classList.add('d-none');
+
+        const btn = document.getElementById('confirmPasswordBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> جاري الحفظ...';
+
+        fetch(`/api/reset-student-password/${currentStudentId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPassword })
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> حفظ كلمة المرور';
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('passwordModal')).hide();
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تم بنجاح!',
+                    html: `تم تعيين كلمة المرور<br><br>
+                           <span style="background:#f0f4ff;padding:10px 24px;border-radius:10px;font-weight:700;font-size:1.2rem;letter-spacing:3px;color:#667eea;">${newPassword}</span><br><br>
+                           <small class="text-muted">أعطِ هذي الكلمة للطالب ليسجل دخوله</small>`,
+                    confirmButtonText: 'حسناً',
+                    confirmButtonColor: '#667eea'
+                });
+            } else {
+                errorText.textContent = data.message || 'حدث خطأ!';
+                errorDiv.classList.remove('d-none');
+            }
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> حفظ كلمة المرور';
+            errorText.textContent = 'حدث خطأ في الاتصال بالسيرفر';
+            errorDiv.classList.remove('d-none');
+        });
+    });
+
+    // زر تأكيد الحذف
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+        if (!studentToDelete) return;
+        try {
+            const response = await fetch(`/api/delete-student/${studentToDelete}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+                location.reload();
+            } else {
+                alert('حدث خطأ أثناء الحذف');
+            }
+        } catch (error) {
+            alert('حدث خطأ في الاتصال بالخادم');
+        }
+    });
+});
+
+function applyFilters() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const deptFilter = document.getElementById('deptFilter').value;
+    const teacherFilter = document.getElementById('teacherFilter').value;
+    const groupFilter = document.getElementById('groupFilter').value;
+    const rows = document.querySelectorAll('#studentsTable tbody tr');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        if (row.querySelector('td[colspan]')) return;
+        const name = row.cells[2].textContent.toLowerCase();
+        const code = row.cells[1].textContent.toLowerCase();
+        const dept = row.getAttribute('data-dept');
+        const teacher = row.getAttribute('data-teacher');
+        const group = row.getAttribute('data-group');
+        const matchesSearch = name.includes(searchTerm) || code.includes(searchTerm);
+        const matchesDept = !deptFilter || dept === deptFilter;
+        const matchesTeacher = !teacherFilter || teacher === teacherFilter;
+        const matchesGroup = !groupFilter || group === groupFilter;
+
+        if (matchesSearch && matchesDept && matchesTeacher && matchesGroup) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    document.getElementById('totalCount').textContent = visibleCount;
+}
+
+function clearFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('deptFilter').value = '';
+    document.getElementById('teacherFilter').value = '';
+    document.getElementById('groupFilter').value = '';
+    document.querySelectorAll('#studentsTable tbody tr').forEach(row => row.style.display = '');
+    updateStats();
+}
+
+function updateStats() {
+    const rows = document.querySelectorAll('#studentsTable tbody tr');
+    const departments = new Set();
+    const teachers = new Set();
+    const groups = new Set();
+
+    rows.forEach(row => {
+        if (row.querySelector('td[colspan]')) return;
+        departments.add(row.getAttribute('data-dept'));
+        teachers.add(row.getAttribute('data-teacher'));
+        groups.add(row.getAttribute('data-group'));
+    });
+
+    document.getElementById('deptCount').textContent = departments.size;
+    document.getElementById('teacherCount').textContent = teachers.size;
+    document.getElementById('groupCount').textContent = groups.size;
+}
+
+function deleteStudent(id, name) {
+    studentToDelete = id;
+    document.getElementById('deleteStudentName').textContent = name;
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+
+function resetStudentPassword(id, name) {
+    currentStudentId = id;
+    document.getElementById('modalStudentName').textContent = 'الطالب: ' + name;
+    document.getElementById('newPasswordInput').value = '';
+    document.getElementById('confirmPasswordInput').value = '';
+    document.getElementById('passwordError').classList.add('d-none');
+    new bootstrap.Modal(document.getElementById('passwordModal')).show();
+    document.getElementById('passwordModal').addEventListener('shown.bs.modal', function() {
+        document.getElementById('newPasswordInput').focus();
+    }, { once: true });
+}
+
+function togglePassword(inputId, btn) {
+    const input = document.getElementById(inputId);
+    const icon = btn.querySelector('i');
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.replace('fa-eye', 'fa-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.replace('fa-eye-slash', 'fa-eye');
+    }
+}
+
+function openPromoteModal() {
+    document.getElementById('promoteFrom').value = '';
+    document.getElementById('promoteTo').value = '';
+    document.getElementById('promotePreview').classList.add('d-none');
+    document.getElementById('promoteError').classList.add('d-none');
+    new bootstrap.Modal(document.getElementById('promoteModal')).show();
+}
+
+function undoPromotion() {
+    if (!confirm('هل تريد التراجع عن آخر عملية ترقية؟\nسيتم إرجاع الطلاب المتأثرين فقط للمرحلة السابقة.')) return;
+
+    fetch('/api/undo-promotion', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            Swal.fire({
+                icon: 'success',
+                title: 'تم التراجع!',
+                text: data.message,
+                confirmButtonText: 'حسناً',
+                confirmButtonColor: '#667eea'
+            }).then(() => location.reload());
+        } else {
+            Swal.fire({ icon: 'error', title: 'خطأ', text: data.message });
+        }
+    })
+    .catch(() => alert('حدث خطأ في الاتصال'));
+}
+
+// تحديث معاينة عدد الطلاب المتأثرين
+document.addEventListener('DOMContentLoaded', function() {
+    // ... existing listeners ...
+
+    ['promoteFrom', 'promoteTo'].forEach(id => {
+        document.getElementById(id).addEventListener('change', function() {
+            const from = document.getElementById('promoteFrom').value;
+            const to = document.getElementById('promoteTo').value;
+            const preview = document.getElementById('promotePreview');
+            const previewText = document.getElementById('promotePreviewText');
+
+            if (from && to) {
+                // عدّ الطلاب في المرحلة المختارة
+                const rows = document.querySelectorAll('#studentsTable tbody tr');
+                let count = 0;
+                rows.forEach(row => {
+                    if (row.querySelector('td[colspan]')) return;
+                    if (row.getAttribute('data-teacher') === from) count++;
+                });
+                previewText.textContent = `سيتم ترقية ${count} طالب من "${from}" إلى "${to}"`;
+                preview.classList.remove('d-none');
+            } else {
+                preview.classList.add('d-none');
+            }
+        });
+    });
+
+    document.getElementById('confirmPromoteBtn').addEventListener('click', function() {
+        const from = document.getElementById('promoteFrom').value;
+        const to = document.getElementById('promoteTo').value;
+        const errorDiv = document.getElementById('promoteError');
+        const errorText = document.getElementById('promoteErrorText');
+
+        if (!from || !to) {
+            errorText.textContent = 'يرجى اختيار المرحلتين!';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+        if (from === to) {
+            errorText.textContent = 'المرحلتان متماثلتان!';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+        errorDiv.classList.add('d-none');
+
+        const btn = document.getElementById('confirmPromoteBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> جاري التطبيق...';
+
+        fetch('/api/promote-students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from_grade: from, to_grade: to })
+        })
+        .then(r => r.json())
+        .then(data => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> تطبيق الترقية';
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('promoteModal')).hide();
+                // إظهار زر التراجع
+                document.getElementById('undoBtn').style.removeProperty('display');
+                Swal.fire({
+                    icon: 'success',
+                    title: 'تمت الترقية!',
+                    html: `تم ترقية <strong>${data.count}</strong> طالب<br>من <b>${from}</b> إلى <b>${to}</b><br><br><small class="text-muted">يمكنك التراجع بالضغط على زر "تراجع عن الترقية"</small>`,
+                    confirmButtonText: 'حسناً',
+                    confirmButtonColor: '#667eea'
+                }).then(() => location.reload());
+            } else {
+                errorText.textContent = data.message || 'حدث خطأ!';
+                errorDiv.classList.remove('d-none');
+            }
+        })
+        .catch(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check me-1"></i> تطبيق الترقية';
+            errorText.textContent = 'حدث خطأ في الاتصال بالسيرفر';
+            errorDiv.classList.remove('d-none');
+        });
+    });
+});
+</script>
+{% endblock %}

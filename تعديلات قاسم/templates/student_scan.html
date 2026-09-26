@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>تسجيل الحضور - {{ student.full_name }}</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        * { font-family: 'Cairo', sans-serif; box-sizing: border-box; }
+        body { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); min-height: 100vh; margin: 0; padding: 0; }
+
+        .topbar {
+            background: rgba(0,0,0,0.25); backdrop-filter: blur(10px);
+            padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .topbar .name { color:#fff; font-weight:700; font-size:.95rem; }
+        .topbar .back-btn {
+            color:#fff; text-decoration:none; background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.35); border-radius:10px;
+            padding:6px 14px; font-size:.88rem;
+        }
+
+        .scan-card {
+            background:#fff; border-radius:24px; box-shadow: 0 20px 60px rgba(0,0,0,0.22);
+            overflow:hidden; margin:18px auto; max-width:650px;
+        }
+        .scan-card-header {
+            background: linear-gradient(135deg,#11998e,#38ef7d);
+            color:#fff; padding:18px 20px; text-align:center;
+        }
+        .scan-card-header h4 { margin:0; font-weight:800; font-size:1.2rem; }
+        .scan-card-header p  { margin:5px 0 0; opacity:.88; font-size:.85rem; }
+        .scan-card-body { padding:20px; }
+
+        /* ═══ الكاميرا ═══ */
+        .cam-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 580px;
+            margin: 0 auto 20px;
+            /* border مدور أزرق/بنفسجي حول الكاميرا */
+            border: 8px solid #667eea;
+            border-radius: 32px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+        }
+
+        #reader {
+            width: 100% !important;
+            height: auto !important;
+            display: block;
+        }
+        #reader video {
+            width: 100% !important;
+            height: auto !important;
+            display: block !important;
+        }
+        /* إخفاء أزرار المكتبة */
+        #html5-qrcode-button-camera-start,
+        #html5-qrcode-button-camera-stop,
+        #html5-qrcode-anchor-scan-type-change {
+            display: none !important;
+        }
+
+        /* ═══ أزرار ═══ */
+        .btn-start, .btn-stop {
+            display:block; width:100%; border:none; border-radius:16px;
+            padding:16px; font-size:1.1rem; font-weight:700; cursor:pointer;
+            box-shadow: 0 6px 20px rgba(17,153,142,.35);
+            transition: all 0.3s ease;
+        }
+        .btn-start:hover, .btn-stop:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(17,153,142,.45);
+        }
+        .btn-start { background: linear-gradient(135deg,#11998e,#38ef7d); color:#fff; }
+        .btn-stop  { background: linear-gradient(135deg,#eb3349,#f45c43); color:#fff; }
+
+        #resultBox { display:none; border-radius:14px; padding:20px; text-align:center; margin-bottom:14px; }
+
+        .tips {
+            background:#f0faf9; border-radius:12px; padding:14px 16px;
+            border-right:4px solid #11998e; margin-top:16px;
+        }
+        .tips li { font-size:.85rem; color:#555; margin-bottom:5px; }
+
+        .proc-overlay {
+            position:fixed; inset:0; background:rgba(17,153,142,.88);
+            display:none; flex-direction:column; align-items:center; justify-content:center; z-index:9999;
+        }
+        .proc-overlay .spinner-border { width:3.5rem; height:3.5rem; color:#fff; }
+        .proc-overlay p { color:#fff; font-size:1.1rem; font-weight:700; margin-top:14px; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="name"><i class="fas fa-user-circle me-2"></i>{{ student.full_name }}</div>
+    <a href="/student/dashboard" class="back-btn"><i class="fas fa-arrow-right me-1"></i>رجوع</a>
+</div>
+
+<div class="proc-overlay" id="procOverlay">
+    <div class="spinner-border"></div>
+    <p>جاري تسجيل الحضور...</p>
+</div>
+
+<div class="container px-3">
+    <div class="scan-card">
+        <div class="scan-card-header">
+            <div style="font-size:2.2rem;margin-bottom:6px;">📷</div>
+            <h4>ماسح تسجيل الحضور</h4>
+            <p>امسح QR المادة الذي يعرضه الأستاذ</p>
+        </div>
+
+        <div class="scan-card-body">
+            <div id="resultBox"></div>
+
+            <!-- الكاميرا نظيفة -->
+            <div id="camBox" style="display:none;">
+                <div class="cam-wrapper">
+                    <div id="reader"></div>
+                </div>
+            </div>
+
+            <div id="startBox" style="margin-bottom:14px;">
+                <button class="btn-start" onclick="startScan()">
+                    <i class="fas fa-camera me-2"></i>افتح الكاميرا وامسح QR المادة
+                </button>
+            </div>
+
+            <div id="stopBox" style="display:none; margin-bottom:14px;">
+                <button class="btn-stop" onclick="stopScan()">
+                    <i class="fas fa-stop me-2"></i>إيقاف الكاميرا
+                </button>
+            </div>
+
+            <div class="tips">
+                <p class="fw-bold text-success mb-2" style="font-size:.9rem;">
+                    <i class="fas fa-lightbulb me-2"></i>تعليمات الاستخدام
+                </p>
+                <ul class="list-unstyled mb-0">
+                    <li><i class="fas fa-check-circle text-success me-2"></i>اضغط "افتح الكاميرا"</li>
+                    <li><i class="fas fa-check-circle text-success me-2"></i>ضع QR المادة في وسط الإطار الأبيض</li>
+                    <li><i class="fas fa-check-circle text-success me-2"></i>سيتم تسجيل حضورك تلقائياً</li>
+                    <li><i class="fas fa-exclamation-circle text-warning me-2"></i>تأكد من الإضاءة الجيدة</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<script>
+    let scanner = null;
+    let scanning = false;
+    let processing = false;
+
+    async function startScan() {
+        if (scanning) return;
+
+        const rb = document.getElementById('resultBox');
+        rb.style.display = 'none';
+        rb.innerHTML = '';
+
+        document.getElementById('camBox').style.display = 'block';
+        document.getElementById('startBox').style.display = 'none';
+        document.getElementById('stopBox').style.display = 'block';
+
+        try { if (scanner) await scanner.stop(); } catch(_) {}
+        scanner = new Html5Qrcode('reader');
+
+        try {
+            await scanner.start(
+                { facingMode: 'environment' },
+                { fps: 20, qrbox: 250 },
+                onScanned,
+                (_err) => {}
+            );
+            scanning = true;
+        } catch (err) {
+            document.getElementById('camBox').style.display = 'none';
+            document.getElementById('startBox').style.display = 'block';
+            document.getElementById('stopBox').style.display = 'none';
+
+            let msg = 'تعذر فتح الكاميرا';
+            if (/Permission|NotAllowed/i.test(String(err)))
+                msg = 'لم يتم السماح بالكاميرا. افتح إعدادات المتصفح وأعط الإذن.';
+            else if (/NotFound/i.test(String(err)))
+                msg = 'لا توجد كاميرا على هذا الجهاز.';
+
+            showResult('error', '📷', 'مشكلة في الكاميرا', msg);
+        }
+    }
+
+    async function stopScan() {
+        if (scanner && scanning) {
+            try { await scanner.stop(); } catch(_) {}
+        }
+        scanning = false;
+        document.getElementById('camBox').style.display = 'none';
+        document.getElementById('startBox').style.display = 'block';
+        document.getElementById('stopBox').style.display = 'none';
+    }
+
+    async function onScanned(text) {
+        if (processing) return;
+        if (!text.startsWith('SUBJECT:')) return;
+
+        processing = true;
+        await stopScan();
+
+        document.getElementById('procOverlay').style.display = 'flex';
+
+        try {
+            const res = await fetch('/student/api/scan-attendance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ qr_data: text })
+            });
+            const data = await res.json();
+            document.getElementById('procOverlay').style.display = 'none';
+
+            if (data.success) {
+                showResult('success', '✅', 'تم تسجيل حضورك!',
+                    'المادة: ' + (data.subject_name || '—'));
+            } else {
+                const already = data.already_registered;
+                showResult(
+                    already ? 'warning' : 'error',
+                    already ? '📋' : '❌',
+                    already ? 'مسجل مسبقاً' : 'تعذر التسجيل',
+                    data.message || 'حدث خطأ'
+                );
+            }
+        } catch(_) {
+            document.getElementById('procOverlay').style.display = 'none';
+            showResult('error', '❌', 'خطأ في الاتصال', 'تأكد من اتصالك بالشبكة');
+        } finally {
+            processing = false;
+        }
+    }
+
+    function showResult(type, icon, title, detail) {
+        const bg  = { success:'#d4edda', error:'#f8d7da', warning:'#fff3cd' };
+        const brd = { success:'#28a745', error:'#dc3545', warning:'#ffc107' };
+        const box = document.getElementById('resultBox');
+
+        box.style.cssText = `
+            display:block; border-radius:14px; padding:22px; text-align:center;
+            background:${bg[type]||bg.error}; border:2px solid ${brd[type]||brd.error};
+            margin-bottom:14px;
+        `;
+        box.innerHTML = `
+            <div style="font-size:2.8rem;margin-bottom:8px;">${icon}</div>
+            <div style="font-size:1.1rem;font-weight:800;margin-bottom:5px;">${title}</div>
+            <div style="font-size:.88rem;color:#444;">${detail}</div>
+            <button onclick="resetScan()"
+                style="margin-top:14px;background:linear-gradient(135deg,#11998e,#38ef7d);
+                       color:#fff;border:none;border-radius:10px;padding:10px 22px;
+                       font-weight:700;cursor:pointer;font-size:.92rem;">
+                <i class="fas fa-redo me-2"></i>مسح مادة أخرى
+            </button>`;
+
+        box.scrollIntoView({ behavior:'smooth', block:'center' });
+    }
+
+    function resetScan() {
+        const rb = document.getElementById('resultBox');
+        rb.style.display = 'none';
+        rb.innerHTML = '';
+        document.getElementById('startBox').style.display = 'block';
+        document.getElementById('stopBox').style.display = 'none';
+        document.getElementById('camBox').style.display = 'none';
+        processing = false;
+    }
+</script>
+
+</body>
+</html>

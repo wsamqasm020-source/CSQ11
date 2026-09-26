@@ -1,0 +1,264 @@
+{% extends 'base.html' %}
+
+{% block title %}توليد QR Code - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header text-center">
+                <h3 class="mb-0">
+                    <i class="fas fa-qrcode me-2"></i>توليد QR Code
+                </h3>
+                <p class="mb-0 mt-2 opacity-75">أدخل البيانات وسيتم توليد الرمز فوراً</p>
+            </div>
+            <div class="card-body p-4">
+                <form id="generateForm">
+                    <div class="row g-3">
+
+                        <div class="col-12">
+                            <label for="fullName" class="form-label">
+                                <i class="fas fa-user me-2 text-primary"></i>الاسم الثلاثي الكامل
+                            </label>
+                            <input type="text" class="form-control" id="fullName" name="full_name"
+                                   placeholder="أدخل الاسم الثلاثي الكامل">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="teacherName" class="form-label">
+                                <i class="fas fa-graduation-cap me-2 text-primary"></i>المرحلة الدراسية
+                            </label>
+                            <select class="form-select" id="teacherName" name="teacher_name" required>
+                                <option value="" selected disabled>اختر المرحلة الدراسية</option>
+                                <option value="الأولى">الأولى</option>
+                                <option value="الثانية">الثانية</option>
+                                <option value="الثالثة">الثالثة</option>
+                                <option value="الرابعة">الرابعة</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label for="groupName" class="form-label">
+                                <i class="fas fa-book-open me-2 text-primary"></i>نوع الدراسة
+                            </label>
+                            <select class="form-select" id="groupName" name="group_name" required>
+                                <option value="" selected disabled>اختر نوع الدراسة</option>
+                                <option value="صباحي">صباحي</option>
+                                <option value="مسائي">مسائي</option>
+                            </select>
+                        </div>
+
+                    </div>
+
+                    <div class="text-center mt-4">
+                        <button type="submit" class="btn btn-primary btn-lg" id="generateBtn">
+                            <i class="fas fa-magic me-2"></i>توليد QR Code
+                        </button>
+                    </div>
+                </form>
+
+                <div id="loadingSpinner" class="text-center mt-4 d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">جاري التوليد...</span>
+                    </div>
+                    <p class="mt-2 text-muted">جاري توليد QR Code...</p>
+                </div>
+
+                <div id="resultSection" class="d-none mt-4">
+                    <hr class="my-4">
+                    <div class="row">
+                        <div class="col-md-6 text-center">
+                            <h5 class="mb-3">QR Code</h5>
+                            <div class="qr-container">
+                                <img id="qrImage" src="" alt="QR Code" class="img-fluid">
+                            </div>
+                            <div class="mt-3">
+                                <button class="btn btn-success" onclick="downloadQR()">
+                                    <i class="fas fa-download me-2"></i>تحميل QR
+                                </button>
+                                <button class="btn btn-info text-white" onclick="printCard()">
+                                    <i class="fas fa-print me-2"></i>طباعة البطاقة
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <h5 class="mb-3">بيانات الطالب</h5>
+                            <div class="student-info p-3 bg-light rounded">
+                                <p><strong><i class="fas fa-id-card me-2"></i>رقم الطالب:</strong>
+                                   <span id="studentCode" class="text-primary fw-bold"></span></p>
+                                <p><strong><i class="fas fa-user me-2"></i>الاسم:</strong>
+                                   <span id="studentName"></span></p>
+                                <p><strong><i class="fas fa-graduation-cap me-2"></i>المرحلة:</strong>
+                                   <span id="studentTeacher" class="text-success fw-bold"></span></p>
+                                <p><strong><i class="fas fa-book-open me-2"></i>نوع الدراسة:</strong>
+                                   <span id="studentGroup"></span></p>
+                            </div>
+                            <div class="alert alert-success mt-3">
+                                <i class="fas fa-check-circle me-2"></i>
+                                تم حفظ بيانات الطالب بنجاح!
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- قالب الطباعة -->
+<div id="printTemplate" class="d-none">
+    <div class="student-id-card">
+        <div class="card-header-print">
+            <h3>بطاقة الطالب</h3>
+        </div>
+        <div class="card-body-print">
+            <div class="qr-print">
+                <img id="printQR" src="" alt="QR Code">
+            </div>
+            <div class="info-print">
+                <p><strong>رقم الطالب:</strong> <span id="printCode"></span></p>
+                <p><strong>الاسم:</strong> <span id="printName"></span></p>
+                <p><strong>المرحلة:</strong> <span id="printTeacher"></span></p>
+                <p><strong>نوع الدراسة:</strong> <span id="printGroup"></span></p>
+            </div>
+        </div>
+        <div class="card-footer-print">
+            <p>نظام تسجيل الحضور QR © 2026</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.student-info p {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e0e0e0;
+}
+.student-info p:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+.student-id-card {
+    width: 350px;
+    border: 2px solid #667eea;
+    border-radius: 15px;
+    overflow: hidden;
+    margin: 0 auto;
+    background: white;
+}
+.card-header-print {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    text-align: center;
+}
+.card-header-print h3 { margin: 0; font-size: 1.5rem; }
+.card-body-print { padding: 20px; text-align: center; }
+.qr-print img { width: 150px; height: 150px; margin-bottom: 15px; }
+.info-print { text-align: right; }
+.info-print p { margin-bottom: 8px; font-size: 14px; }
+.card-footer-print { background: #f8f9fa; padding: 10px; text-align: center; font-size: 12px; color: #666; }
+
+@media print {
+    body * { visibility: hidden; }
+    #printTemplate, #printTemplate * { visibility: visible; }
+    #printTemplate {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        display: block !important;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentQRData = null;
+
+document.getElementById('generateForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const teacherName = document.getElementById('teacherName').value;
+    const groupName   = document.getElementById('groupName').value;
+
+    if (!teacherName || !groupName) {
+        showToast('اختر المرحلة ونوع الدراسة أولاً', 'warning');
+        return;
+    }
+
+    document.getElementById('loadingSpinner').classList.remove('d-none');
+    document.getElementById('resultSection').classList.add('d-none');
+    document.getElementById('generateBtn').disabled = true;
+
+    try {
+        const response = await fetch('/api/generate-qr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                qr_mode: 'student',
+                full_name: document.getElementById('fullName').value.trim(),
+                department: 'الأمن السيبراني',
+                teacher_name: teacherName,
+                group_name: groupName
+            })
+        });
+
+        const data = await response.json();
+        if (!data.success) throw new Error(data.message || 'حدث خطأ في الخادم');
+
+        currentQRData = data;
+        document.getElementById('qrImage').src       = data.qr_code;
+        document.getElementById('studentCode').textContent   = data.student_code;
+        document.getElementById('studentName').textContent   = document.getElementById('fullName').value;
+        document.getElementById('studentTeacher').textContent = teacherName;
+        document.getElementById('studentGroup').textContent  = groupName;
+
+        document.getElementById('resultSection').classList.remove('d-none');
+        document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+        showToast('تم حفظ بيانات الطالب بنجاح!', 'success');
+
+    } catch (error) {
+        showToast('تنبيه: ' + error.message, 'error');
+    } finally {
+        document.getElementById('loadingSpinner').classList.add('d-none');
+        document.getElementById('generateBtn').disabled = false;
+    }
+});
+
+function downloadQR() {
+    if (!currentQRData) return;
+    const name = document.getElementById('fullName').value.trim()
+        .replace(/\s+/g, '_').replace(/[^\w\u0621-\u064A]/g, '').substring(0, 30);
+    const link = document.createElement('a');
+    link.download = name ? `${name}_QR.png` : `QR_${currentQRData.student_code}.png`;
+    link.href = currentQRData.qr_code;
+    link.click();
+    showToast('تم تحميل QR الطالب', 'success');
+}
+
+function printCard() {
+    if (!currentQRData) return;
+    document.getElementById('printQR').src       = currentQRData.qr_code;
+    document.getElementById('printCode').textContent  = currentQRData.student_code;
+    document.getElementById('printName').textContent  = document.getElementById('fullName').value;
+    document.getElementById('printTeacher').textContent = document.getElementById('teacherName').value;
+    document.getElementById('printGroup').textContent  = document.getElementById('groupName').value;
+    window.print();
+}
+
+function showToast(message, type = 'success') {
+    Swal.mixin({
+        toast: true,
+        position: 'top-start',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true
+    }).fire({ icon: type, title: message });
+}
+</script>
+{% endblock %}

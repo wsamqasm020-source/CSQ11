@@ -1,0 +1,256 @@
+{% extends 'base.html' %}
+{% block title %}إعداد الشبكة - نظام الحضور{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-md-9 col-lg-8">
+
+  <!-- بطاقة الحالة -->
+  <div class="card mb-4 animate-fade-in">
+    <div class="card-header text-center">
+      <h4 class="mb-0"><i class="fas fa-wifi me-2"></i>إعداد شبكة الحضور</h4>
+      <p class="mb-0 mt-1 opacity-75 small">شغّل الـ Hotspot ليتصل الطلاب بدون إنترنت</p>
+    </div>
+    <div class="card-body p-4">
+
+      <!-- حالة الشبكة -->
+      <div class="d-flex align-items-center justify-content-between p-3 rounded-3 mb-4"
+           id="statusBar" style="background:#f0fdf4;border:2px solid #86efac;">
+        <div class="d-flex align-items-center gap-3">
+          <div id="statusDot" style="width:14px;height:14px;border-radius:50%;background:#22c55e;"></div>
+          <div>
+            <div class="fw-bold" id="statusText">جاري الفحص...</div>
+            <div class="small text-muted" id="statusSub"></div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="refreshStatus()">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+
+      <!-- الخطوات -->
+      <div class="row g-3 mb-4">
+        <div class="col-md-4">
+          <div class="text-center p-3 bg-light rounded-3 h-100">
+            <div class="fs-1 mb-2">📡</div>
+            <div class="badge bg-primary mb-2">الخطوة 1</div>
+            <div class="fw-bold small">شغّل الشبكة</div>
+            <div class="text-muted" style="font-size:.8rem">اضغط زر التشغيل أدناه</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="text-center p-3 bg-light rounded-3 h-100">
+            <div class="fs-1 mb-2">📱</div>
+            <div class="badge bg-primary mb-2">الخطوة 2</div>
+            <div class="fw-bold small">الطالب يتصل</div>
+            <div class="text-muted" style="font-size:.8rem">
+              شبكة: <strong>حضور-QR</strong><br>
+              كلمة المرور: <strong>12345678</strong>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="text-center p-3 bg-light rounded-3 h-100">
+            <div class="fs-1 mb-2">✅</div>
+            <div class="badge bg-success mb-2">الخطوة 3</div>
+            <div class="fw-bold small">يمسح الـ QR</div>
+            <div class="text-muted" style="font-size:.8rem">يفتح موقع الحضور تلقائياً</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- أزرار التحكم -->
+      <div class="d-grid gap-2 mb-4">
+        <a href="/api/start-hotspot" class="btn btn-success btn-lg">
+          <i class="fas fa-broadcast-tower me-2"></i>1️⃣ تشغيل شبكة الحضور (تلقائي)
+        </a>
+        <button onclick="manualActivation()" class="btn btn-primary btn-lg">
+          <i class="fas fa-check-circle me-2"></i>✋ لقد شغّلت الهوت سبوت يدوياً
+        </button>
+        <a href="/api/stop-hotspot" class="btn btn-outline-danger">
+          <i class="fas fa-stop-circle me-2"></i>إيقاف الشبكة
+        </a>
+        <button onclick="openWindowsHotspot()" class="btn btn-outline-primary">
+          <i class="fas fa-cog me-2"></i>2️⃣ إعدادات Windows (يدوي)
+        </button>
+        <div class="alert alert-info mb-0 small">
+          <strong>💡 نصيحة:</strong>
+          <ul class="mb-0 mt-2 pe-3">
+            <li>شغّل الهوت سبوت من إعدادات Windows</li>
+            <li>بعدين ارجع هنا واضغط "✋ لقد شغّلت الهوت سبوت يدوياً"</li>
+            <li>اسم الشبكة: <strong>حضور-QR</strong></li>
+            <li>كلمة المرور: <strong>12345678</strong></li>
+          </ul>
+        </div>
+      </div>
+
+      <hr>
+
+      <!-- تم إزالة QR الطلاب -->
+
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- Modal عرض QR كامل -->
+<div class="modal fade" id="qrModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content text-center border-0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title w-100 text-success fw-bold">امسح للدخول لموقع الحضور</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body py-3">
+        <div id="qrModalContainer" class="d-inline-block"></div>
+        <div class="mt-3">
+          <span class="badge bg-success px-3 py-2" id="qrModalUrl" style="font-size:.9rem"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+  let currentQR = null;
+  let currentUrl = '';
+
+  // جلب معلومات الشبكة وتوليد QR
+  async function loadNetworkInfo() {
+    try {
+      const res  = await fetch('/api/network-info');
+      const data = await res.json();
+      if (!data.success) return;
+
+      currentUrl = data.student_url;
+
+      // تحديث حالة الشبكة
+      const bar = document.getElementById('statusBar');
+      const dot = document.getElementById('statusDot');
+      const txt = document.getElementById('statusText');
+      const sub = document.getElementById('statusSub');
+
+      if (data.hotspot_active) {
+        bar.style.background = '#f0fdf4';
+        bar.style.border = '2px solid #86efac';
+        dot.style.background = '#22c55e';
+        txt.textContent = '✅ شبكة الحضور تعمل';
+        sub.textContent = `IP: ${data.hotspot_ip} — الطلاب يتصلون بـ "حضور-QR"`;
+      } else {
+        bar.style.background = '#fefce8';
+        bar.style.border = '2px solid #fde047';
+        dot.style.background = '#eab308';
+        txt.textContent = '⚠️ الشبكة غير مفعّلة';
+        sub.textContent = `IP الشبكة الحالية: ${data.local_ip} — اضغط "تشغيل شبكة الحضور"`;
+      }
+
+      // تحديث الرابط
+      document.getElementById('studentUrlBadge').textContent = currentUrl;
+
+      // توليد QR
+      document.getElementById('qrContainer').innerHTML = '';
+      currentQR = new QRCode(document.getElementById('qrContainer'), {
+        text: currentUrl,
+        width: 220,
+        height: 220,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+
+    } catch (e) {
+      console.error('Network info error:', e);
+    }
+  }
+
+  function refreshStatus() {
+    document.getElementById('statusText').textContent = 'جاري الفحص...';
+    loadNetworkInfo();
+  }
+
+  function manualActivation() {
+    // تفعيل يدوي - تغيير الحالة مباشرة بدون فحص
+    const bar = document.getElementById('statusBar');
+    const dot = document.getElementById('statusDot');
+    const txt = document.getElementById('statusText');
+    const sub = document.getElementById('statusSub');
+
+    bar.style.background = '#f0fdf4';
+    bar.style.border = '2px solid #86efac';
+    dot.style.background = '#22c55e';
+    txt.textContent = '✅ شبكة الحضور تعمل (يدوي)';
+    sub.textContent = 'IP: 192.168.137.1 — الطلاب يتصلون بـ "حضور-QR"';
+
+    // تحديث الرابط
+    currentUrl = 'http://192.168.137.1:5002';
+    document.getElementById('studentUrlBadge').textContent = currentUrl;
+
+    // توليد QR
+    document.getElementById('qrContainer').innerHTML = '';
+    currentQR = new QRCode(document.getElementById('qrContainer'), {
+      text: currentUrl,
+      width: 220,
+      height: 220,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H
+    });
+  }
+
+  function openWindowsHotspot() {
+    // فتح إعدادات Windows مباشرة
+    window.location.href = 'ms-settings:network-mobilehotspot';
+  }
+
+  function showFullscreen() {
+    if (!currentUrl) return;
+    document.getElementById('qrModalUrl').textContent = currentUrl;
+    document.getElementById('qrModalContainer').innerHTML = '';
+    new QRCode(document.getElementById('qrModalContainer'), {
+      text: currentUrl,
+      width: 300,
+      height: 300,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H
+    });
+    new bootstrap.Modal(document.getElementById('qrModal')).show();
+  }
+
+  function downloadQR() {
+    const img = document.querySelector('#qrContainer img');
+    if (!img) return;
+    const a = document.createElement('a');
+    a.download = 'QR_حضور.png';
+    a.href = img.src;
+    a.click();
+  }
+
+  function printQR() {
+    const img = document.querySelector('#qrContainer img');
+    if (!img) return;
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html dir="rtl"><head><title>QR الحضور</title>
+      <style>body{text-align:center;font-family:Cairo,sans-serif;padding:40px}
+      h2{margin-bottom:10px} p{color:#666;margin-bottom:20px}</style></head>
+      <body>
+        <h2>امسح للدخول لموقع الحضور</h2>
+        <p>${currentUrl}</p>
+        <img src="${img.src}" style="width:250px;height:250px">
+        <script>window.onload=()=>{window.print();window.close()}<\/script>
+      </body></html>
+    `);
+    w.document.close();
+  }
+
+  // تحميل عند فتح الصفحة وكل 10 ثواني
+  loadNetworkInfo();
+  setInterval(loadNetworkInfo, 10000);
+</script>
+{% endblock %}

@@ -1,0 +1,610 @@
+{% extends 'base.html' %}
+
+{% block title %}سجل الحضور - نظام تسجيل الحضور{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="text-white">
+            <i class="fas fa-clipboard-list me-2"></i>سجل الحضور
+        </h2>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-filter me-2"></i>تصفية السجل</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <!-- الكورس - يجي أول -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">الكورس</label>
+                <select class="form-select" id="courseFilter" onchange="filterSubjectsByCourse()">
+                    <option value="">جميع الكورسات</option>
+                    <option value="أول">الكورس الأول</option>
+                    <option value="ثاني">الكورس الثاني</option>
+                </select>
+            </div>
+
+            <!-- المادة -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">المادة</label>
+                <select class="form-select" id="subjectFilter" onchange="updateDateToLatestForSubject()">
+                    <option value="">جميع المواد</option>
+                    {% for subject in subjects %}
+                    <option value="{{ subject.id }}" data-course="{{ subject.course_type }}" data-grade="{{ subject.grade }}">{{ subject.name }} ({{ subject.grade|default('الأولى') }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- المرحلة الدراسية - الأولى/الثانية/الثالثة/الرابعة -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">المرحلة الدراسية</label>
+                <select class="form-select" id="stageFilter">
+                    <option value="">جميع المراحل</option>
+                    <option value="الأولى">الأولى</option>
+                    <option value="الثانية">الثانية</option>
+                    <option value="الثالثة">الثالثة</option>
+                    <option value="الرابعة">الرابعة</option>
+                </select>
+            </div>
+
+            <!-- نوع الدراسة - صباحي/مسائي -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">نوع الدراسة</label>
+                <select class="form-select" id="studyTypeFilter">
+                    <option value="">جميع الأنواع</option>
+                    <option value="صباحي">صباحي</option>
+                    <option value="مسائي">مسائي</option>
+                </select>
+            </div>
+
+            <!-- التاريخ -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">التاريخ</label>
+                <input type="date" class="form-control" id="dateFilter" value="{{ today }}">
+            </div>
+
+            <!-- الأزرار -->
+            <div class="col-md-6 col-lg-2">
+                <label class="form-label">&nbsp;</label>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-primary w-100" onclick="loadAttendance()">
+                        <i class="fas fa-search me-2"></i>عرض
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="clearFilters()" title="مسح الفلتر">
+                        <i class="fas fa-undo"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Today's Stats -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="stats-card">
+            <i class="fas fa-calendar-day fa-3x text-primary mb-3"></i>
+            <div class="stats-number" id="todayTotal">0</div>
+            <p class="text-muted mb-0">حضور اليوم</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card">
+            <i class="fas fa-book fa-3x text-success mb-3"></i>
+            <div class="stats-number" id="todaySubjects">0</div>
+            <p class="text-muted mb-0">مواد نشطة اليوم</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card">
+            <i class="fas fa-chalkboard-teacher fa-3x text-info mb-3"></i>
+            <div class="stats-number" id="todayTeachers">0</div>
+            <p class="text-muted mb-0">أساتذة نشطون</p>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stats-card">
+            <i class="fas fa-users fa-3x text-warning mb-3"></i>
+            <div class="stats-number" id="todayGroups">0</div>
+            <p class="text-muted mb-0">كروبات نشطة</p>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-3" id="attendanceNoticeRow" style="display:none;">
+    <div class="col-12">
+        <div id="attendanceNotice" class="alert alert-info py-2 px-3" role="alert"></div>
+    </div>
+</div>
+
+<!-- Attendance Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-list me-2"></i>قائمة الحضور</h5>
+        <button class="btn btn-success btn-sm" onclick="exportToExcel()">
+            <i class="fas fa-file-excel me-2"></i>تصدير Excel
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="attendanceTable">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>رقم الطالب</th>
+                        <th>اسم الطالب</th>
+                        <th>اسم الأستاذ</th>
+                        <th>المادة</th>
+                        <th>المرحلة الدراسية</th>
+                        <th>نوع الدراسة</th>
+                        <th>التاريخ</th>
+                        <th>الحالة</th>
+                    </tr>
+                </thead>
+                <tbody id="attendanceBody">
+                    <tr>
+                        <td colspan="9" class="text-center py-5">
+                            <i class="fas fa-clipboard fa-4x text-muted mb-3"></i>
+                            <p class="text-muted">اختر المادة والتاريخ لعرض سجل الحضور</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Subject-wise Stats -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-chart-bar me-2"></i>إحصائيات الحضور حسب المادة والأستاذ</h5>
+    </div>
+    <div class="card-body">
+        <div id="subjectStats">
+            <p class="text-muted text-center mb-0">جاري التحميل...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allAttendance = [];
+let currentSubject = null;
+let isDateManuallySelected = false;
+
+// ✅ مفاتيح الكاش المحلي
+const CACHE_KEY_STATS = 'cached_attendance_stats';
+const CACHE_KEY_ATTENDANCE = 'cached_attendance_data';
+const CACHE_KEY_SUBJECT_STATS = 'cached_subject_stats';
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadTodayStats();
+    loadSubjectStats();
+
+    // علامة لو المستخدم غيّر التاريخ يدويًا
+    document.getElementById('dateFilter').addEventListener('change', function() {
+        isDateManuallySelected = true;
+    });
+
+    // ✅ مؤشر offline
+    if (!navigator.onLine) {
+        showOfflineBanner();
+    }
+    window.addEventListener('offline', showOfflineBanner);
+    window.addEventListener('online', hideOfflineBanner);
+});
+
+function showOfflineBanner() {
+    let banner = document.getElementById('offlineBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'offlineBanner';
+        banner.className = 'alert alert-warning text-center mb-3';
+        banner.innerHTML = '<i class="fas fa-wifi me-2"></i>أنت غير متصل - يتم عرض آخر بيانات محفوظة';
+        document.querySelector('.container')?.prepend(banner);
+    }
+}
+
+function hideOfflineBanner() {
+    document.getElementById('offlineBanner')?.remove();
+    // أعد تحميل البيانات الحديثة
+    loadTodayStats();
+    loadSubjectStats();
+}
+
+function showAttendanceNotice(message) {
+    const notice = document.getElementById('attendanceNotice');
+    const row = document.getElementById('attendanceNoticeRow');
+    if (!notice || !row) return;
+    notice.textContent = message;
+    row.style.display = 'block';
+}
+
+function hideAttendanceNotice() {
+    const notice = document.getElementById('attendanceNotice');
+    const row = document.getElementById('attendanceNoticeRow');
+    if (!notice || !row) return;
+    notice.textContent = '';
+    row.style.display = 'none';
+}
+
+async function loadTodayStats() {
+    const today = document.getElementById('dateFilter').value;
+    let totalAttendance = 0;
+    let activeSubjects = new Set();
+    let activeTeachers = new Set();
+    let activeGroups = new Set();
+
+    const subjects = document.querySelectorAll('#subjectFilter option');
+
+    // ✅ إذا offline، حمّل من الكاش المحلي
+    if (!navigator.onLine) {
+        const cached = localStorage.getItem(CACHE_KEY_STATS);
+        if (cached) {
+            const data = JSON.parse(cached);
+            document.getElementById('todayTotal').textContent = data.total || 0;
+            document.getElementById('todaySubjects').textContent = data.subjects || 0;
+            document.getElementById('todayTeachers').textContent = data.teachers || 0;
+            document.getElementById('todayGroups').textContent = data.groups || 0;
+        }
+        return;
+    }
+
+    for (const option of subjects) {
+        if (!option.value) continue;
+
+        try {
+            const response = await fetch(`/api/attendance/${option.value}?date=${today}`);
+            const data = await response.json();
+
+            if (data.success && data.attendance.length > 0) {
+                const presentCount = data.attendance.filter(r => r.is_present).length;
+                totalAttendance += presentCount;
+                activeSubjects.add(option.value);
+                if (data.subject) activeTeachers.add(data.subject.teacher_name);
+                data.attendance.forEach(record => {
+                    if (record.group_name) activeGroups.add(record.group_name);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading stats:', error);
+        }
+    }
+
+    document.getElementById('todayTotal').textContent = totalAttendance;
+    document.getElementById('todaySubjects').textContent = activeSubjects.size;
+    document.getElementById('todayTeachers').textContent = activeTeachers.size;
+    document.getElementById('todayGroups').textContent = activeGroups.size;
+
+    // ✅ احفظ بالكاش المحلي
+    localStorage.setItem(CACHE_KEY_STATS, JSON.stringify({
+        total: totalAttendance,
+        subjects: activeSubjects.size,
+        teachers: activeTeachers.size,
+        groups: activeGroups.size,
+        date: today
+    }));
+}
+
+async function updateDateToLatestForSubject() {
+    const subjectId = document.getElementById('subjectFilter').value;
+    const dateInput = document.getElementById('dateFilter');
+
+    if (!subjectId) {
+        // أعد تعيين فلتر المرحلة لما تمسح المادة
+        document.getElementById('stageFilter').value = '';
+        return;
+    }
+
+    // ✅ ضبط فلتر المرحلة تلقائياً من data-grade مال الـ option
+    const selectedOption = document.querySelector(`#subjectFilter option[value="${subjectId}"]`);
+    if (selectedOption && selectedOption.dataset.grade) {
+        document.getElementById('stageFilter').value = selectedOption.dataset.grade;
+    }
+
+    if (isDateManuallySelected && dateInput.value) return;
+
+    try {
+        const response = await fetch(`/api/attendance/latest_date/${subjectId}`);
+        const data = await response.json();
+        if (data.success && data.latest_date) {
+            dateInput.value = data.latest_date;
+            isDateManuallySelected = false;
+        } else {
+            dateInput.value = new Date().toISOString().split('T')[0];
+            isDateManuallySelected = false;
+        }
+    } catch (error) {
+        console.error('Error getting latest date:', error);
+    }
+}
+
+async function loadAttendance() {
+    const subjectId = document.getElementById('subjectFilter').value;
+    const stageFilter = document.getElementById('stageFilter').value;
+    const studyTypeFilter = document.getElementById('studyTypeFilter').value;
+    const date = document.getElementById('dateFilter').value;
+
+    if (!subjectId) {
+        alert('الرجاء اختيار المادة');
+        return;
+    }
+
+    const tbody = document.getElementById('attendanceBody');
+    tbody.innerHTML = `<tr><td colspan="9" class="text-center py-4">
+        <div class="spinner-border text-primary" role="status"></div>
+    </td></tr>`;
+
+    // ✅ إذا offline، حمّل من الكاش المحلي
+    if (!navigator.onLine) {
+        const cacheKey = `${CACHE_KEY_ATTENDANCE}_${subjectId}_${date}`;
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+            const cachedData = JSON.parse(cached);
+            renderAttendanceTable(cachedData.attendance, cachedData.subject);
+            showOfflineBanner();
+        } else {
+            tbody.innerHTML = `<tr><td colspan="9" class="text-center py-5 text-warning">
+                <i class="fas fa-wifi fa-3x mb-3"></i>
+                <p>لا يوجد اتصال ولا توجد بيانات محفوظة لهذه المادة</p>
+            </td></tr>`;
+        }
+        return;
+    }
+
+    try {
+        const url = date 
+            ? `/api/attendance/${subjectId}?date=${date}`
+            : `/api/attendance/${subjectId}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.success) {
+            currentSubject = data.subject;
+            let filteredAttendance = data.attendance;
+
+            let usedDate = date;
+            if (data.used_date && data.used_date !== date) {
+                usedDate = data.used_date;
+                document.getElementById('dateFilter').value = usedDate;
+                isDateManuallySelected = false;
+                showAttendanceNotice(`لا يوجد حضور حسب التاريخ ${date}، يتم عرض آخر حضور متاح ${usedDate}`);
+            } else {
+                hideAttendanceNotice();
+            }
+
+            // ✅ احفظ بالكاش المحلي
+            const cacheKey = `${CACHE_KEY_ATTENDANCE}_${subjectId}_${usedDate}`;
+            localStorage.setItem(cacheKey, JSON.stringify({
+                attendance: data.attendance,
+                subject: data.subject
+            }));
+
+            // تطبيق فلتر المرحلة الدراسية (الأولى/الثانية/الثالثة/الرابعة)
+            if (stageFilter) {
+                filteredAttendance = filteredAttendance.filter(record => 
+                    record.teacher_name === stageFilter
+                );
+            }
+
+            // تطبيق فلتر نوع الدراسة (صباحي/مسائي)
+            if (studyTypeFilter) {
+                filteredAttendance = filteredAttendance.filter(record => 
+                    record.student_group === studyTypeFilter
+                );
+            }
+
+            renderAttendanceTable(filteredAttendance, data.subject);
+        } else {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="9" class="text-center py-5 text-danger">
+                        <i class="fas fa-exclamation-circle fa-3x mb-3"></i>
+                        <p>حدث خطأ في تحميل البيانات</p>
+                    </td>
+                </tr>
+            `;
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-5 text-danger">
+                    <i class="fas fa-exclamation-circle fa-3x mb-3"></i>
+                    <p>حدث خطأ في الاتصال بالخادم</p>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function renderAttendanceTable(attendance, subject) {
+    const tbody = document.getElementById('attendanceBody');
+
+    if (attendance.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="9" class="text-center py-5">
+                    <i class="fas fa-inbox fa-4x text-muted mb-3"></i>
+                    <p class="text-muted">لا يوجد سجل حضور مطابق للفلاتر</p>
+                </td>
+            </tr>
+        `;
+        allAttendance = [];
+        return;
+    }
+
+    // حفظ البيانات مع إضافة معلومات المادة
+    allAttendance = attendance.map(record => ({
+        ...record,
+        subject_name: subject ? subject.name : '-',
+        subject_teacher: subject ? subject.teacher_name : '-'
+    }));
+
+    // ترتيب البيانات أبجدياً حسب اسم الطالب
+    allAttendance.sort((a, b) => a.full_name.localeCompare(b.full_name, 'ar'));
+
+    // عرض البيانات
+    tbody.innerHTML = allAttendance.map((record, index) => `
+        <tr>
+            <td>${index + 1}</td>
+            <td><span class="badge bg-primary">${record.student_code}</span></td>
+            <td><strong>${record.full_name}</strong></td>
+            <td><span class="badge bg-info">${record.subject_teacher}</span></td>
+            <td>${record.subject_name}</td>
+            <td><span class="badge bg-warning text-dark">${record.teacher_name || '-'}</span></td>
+            <td><span class="badge bg-secondary">${record.group_name || '-'}</span></td>
+            <td>${record.attendance_date || new Date().toISOString().split('T')[0]}</td>
+            <td>
+                ${record.is_present ? 
+                    '<span class="badge bg-success"><i class="fas fa-check me-1"></i>حاضر</span>' : 
+                    '<span class="badge bg-danger"><i class="fas fa-times me-1"></i>غائب</span>'
+                }
+            </td>
+        </tr>
+    `).join('');
+}
+
+function clearFilters() {
+    document.getElementById('courseFilter').value = '';
+    document.getElementById('subjectFilter').value = '';
+    document.getElementById('stageFilter').value = '';
+    document.getElementById('studyTypeFilter').value = '';
+    document.getElementById('dateFilter').value = new Date().toISOString().split('T')[0];
+    isDateManuallySelected = false;
+    filterSubjectsByCourse();
+    document.getElementById('attendanceBody').innerHTML = `
+        <tr>
+            <td colspan="9" class="text-center py-5">
+                <i class="fas fa-clipboard fa-4x text-muted mb-3"></i>
+                <p class="text-muted">اختر المادة والتاريخ لعرض سجل الحضور</p>
+            </td>
+        </tr>
+    `;
+    allAttendance = [];
+}
+
+function filterSubjectsByCourse() {
+    const course = document.getElementById('courseFilter').value;
+    const subjectSelect = document.getElementById('subjectFilter');
+    const options = subjectSelect.querySelectorAll('option');
+
+    // أعد تعيين المادة المختارة
+    subjectSelect.value = '';
+
+    options.forEach(opt => {
+        if (!opt.value) return; // خيار "جميع المواد"
+        if (!course || opt.dataset.course === course) {
+            opt.style.display = '';
+        } else {
+            opt.style.display = 'none';
+        }
+    });
+}
+
+function exportToExcel() {
+    if (allAttendance.length === 0) {
+        alert('لا يوجد بيانات للتصدير');
+        return;
+    }
+
+    // ترتيب أبجدي حسب اسم الطالب ثم حضور/غياب
+    const sortedAttendance = [...allAttendance].sort((a, b) => {
+        const name = a.full_name.localeCompare(b.full_name, 'ar', { sensitivity: 'base' });
+        if (name !== 0) return name;
+        return (b.is_present ? 1 : 0) - (a.is_present ? 1 : 0);
+    });
+ئئئئئ
+    let csv = '\uFEFF';
+    csv += 'رقم,الرقم الجامعي,اسم الطالب,اسم الأستاذ,المادة,المرحلة الدراسية,نوع الدراسة,التاريخ,الحالة\n';
+
+    sortedAttendance.forEach((record, index) => {
+        const row = [
+            index + 1,
+            record.student_code,
+            `"${record.full_name}"`,
+            `"${record.subject_teacher}"`,
+            `"${record.subject_name}"`,
+            `"${record.teacher_name || '-'}"`,
+            `"${record.group_name || '-'}"`,
+            record.attendance_date || new Date().toISOString().split('T')[0],
+            record.is_present ? 'حاضر' : 'غائب'
+        ];
+
+        csv += row.join(',') + '\n';
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `attendance_${new Date().toISOString().split('T')[0]}_sorted.csv`;
+    link.click();
+}
+
+// تنسيق حجم الخط لا يمكن التحكم فيه عبر CSV مباشرة، إذا أردت مظهر أكبر يجب استخدام XLSX/Excel والتنسيق من داخل البرنامج
+// يمكن إضافة دعم XLSX لاحقاً عبر مكتبة SheetJS (XLSX.js)
+
+async function loadSubjectStats() {
+    const today = document.getElementById('dateFilter').value;
+    const container = document.getElementById('subjectStats');
+
+    // ✅ إذا offline، حمّل من الكاش المحلي
+    if (!navigator.onLine) {
+        const cached = localStorage.getItem(CACHE_KEY_SUBJECT_STATS);
+        if (cached) {
+            container.innerHTML = JSON.parse(cached).html || '<p class="text-muted text-center">لا توجد بيانات محفوظة</p>';
+        } else {
+            container.innerHTML = '<p class="text-warning text-center"><i class="fas fa-wifi me-2"></i>لا يوجد اتصال ولا توجد بيانات محفوظة</p>';
+        }
+        return;
+    }
+
+    let html = '';
+    const subjectOptions = document.querySelectorAll('#subjectFilter option');
+
+    for (const option of subjectOptions) {
+        if (!option.value) continue;
+
+        try {
+            const response = await fetch(`/api/attendance/${option.value}?date=${today}`);
+            const data = await response.json();
+
+            if (data.success && data.attendance.length > 0) {
+                const presentStudents = data.attendance.filter(r => r.is_present);
+                const uniqueStudents = new Set(presentStudents.map(r => r.id));
+                const count = uniqueStudents.size;
+                if (count === 0) continue; // ✅ تجاهل المواد بدون حضور
+                const label = count === 1 ? 'طالب' : 'طلاب';
+
+                html += `
+                    <div class="d-flex justify-content-between align-items-center p-3 mb-2 bg-light rounded">
+                        <div>
+                            <span class="fw-bold">${data.subject.name}</span>
+                            <span class="text-muted">- أ. ${data.subject.teacher_name}</span>
+                        </div>
+                        <span class="badge bg-primary fs-6">${count} ${label}</span>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading subject stats:', error);
+        }
+    }
+
+    if (html) {
+        container.innerHTML = html;
+        // ✅ احفظ بالكاش المحلي
+        localStorage.setItem(CACHE_KEY_SUBJECT_STATS, JSON.stringify({ html, date: today }));
+        container.innerHTML = html;
+    } else {
+        container.innerHTML = '<p class="text-muted text-center mb-0">لا توجد إحصائيات لليوم</p>';
+    }
+}
+</script>
+{% endblock %}
