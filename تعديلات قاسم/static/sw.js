@@ -1,4 +1,4 @@
-const CACHE_NAME = 'attendance-v11';
+const CACHE_NAME = 'attendance-v12';
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
 ];
 
 // هذه المسارات لا تُخزن في الـ cache أبداً
-const BYPASS_PATHS = ['/logout', '/login', '/student/login', '/teacher/login', '/static/uploads/'];
+const BYPASS_PATHS = ['/logout', '/login', '/student/login', '/teacher/login', '/generate', '/static/uploads/'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -105,4 +105,4 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-console.log('[SW] v11 loaded');
+console.log('[SW] v12 loaded');
