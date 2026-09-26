@@ -200,16 +200,6 @@ def init_database():
         )
     ''')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS attendance_sync_events (
-            event_id TEXT PRIMARY KEY,
-            student_id INTEGER,
-            subject_id INTEGER NOT NULL,
-            scanned_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS users (
             id {PK},
