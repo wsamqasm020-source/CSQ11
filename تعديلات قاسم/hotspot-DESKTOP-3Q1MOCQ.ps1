@@ -12,6 +12,7 @@ if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 $SSID     = "حضور-QR"
 $Password = "12345678"
+$Port     = if ($env:PORT -match '^\d+$') { [int]$env:PORT } else { 5000 }
 
 Clear-Host
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -94,7 +95,7 @@ if ($success) {
     Write-Host "  IP الشبكة   : " -NoNewline; Write-Host "192.168.137.1" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  🌐 رابط الطلاب:" -ForegroundColor White
-    Write-Host "  http://192.168.137.1:5000/" -ForegroundColor Green
+    Write-Host "  http://192.168.137.1:$Port/" -ForegroundColor Green
     Write-Host "=========================================" -ForegroundColor Green
 } else {
     Write-Host "=========================================" -ForegroundColor Yellow
