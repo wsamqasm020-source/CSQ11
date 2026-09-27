@@ -1,4 +1,4 @@
-const CACHE_NAME = 'attendance-v14';
+const CACHE_NAME = 'attendance-v15';
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -143,4 +143,4 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-console.log('[SW] v12 loaded');
+console.log(`[SW] ${CACHE_NAME} loaded`);
