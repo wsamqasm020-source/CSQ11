@@ -1,5 +1,16 @@
 const CACHE_NAME = 'attendance-v12';
 
+const STATIC_ASSETS = [
+  '/offline.html',
+  '/static/css/style.css',
+  '/static/css/bootstrap.min.css',
+  '/static/js/app.js',
+  '/static/js/bootstrap.bundle.min.js',
+  '/static/js/html5-qrcode.min.js',
+  '/static/icons/icon-192x192.png',
+  '/static/icons/icon-512x512.png'
+];
+
 const BYPASS_PATHS = [
   '/logout',
   '/login',
