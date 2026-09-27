@@ -217,6 +217,26 @@ def unified_index():
     # جلب شعار النظام من الإعدادات (نفس صورة القسم)
     settings_data = get_settings()
     logo_path = settings_data.get('dept_image') or settings_data.get('system_logo') or '/static/icons/icon-192x192.png'
+
+    if logo_path.startswith('/static/uploads/'):
+        upload_dir = os.path.join(app.static_folder, 'uploads')
+        configured_logo = os.path.join(upload_dir, os.path.basename(logo_path))
+        if not os.path.isfile(configured_logo):
+            try:
+                logo_files = [
+                    os.path.join(upload_dir, name)
+                    for name in os.listdir(upload_dir)
+                    if name.startswith('dept_logo_')
+                    and os.path.isfile(os.path.join(upload_dir, name))
+                ]
+            except OSError:
+                logo_files = []
+
+            if logo_files:
+                latest_logo = max(logo_files, key=os.path.getmtime)
+                logo_path = f'/static/uploads/{os.path.basename(latest_logo)}'
+            else:
+                logo_path = '/static/icons/icon-192x192.png'
     
     # إضافة timestamp لتجنب cache المتصفح
     import time
