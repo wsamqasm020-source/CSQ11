@@ -119,6 +119,8 @@
 <script>
   let currentQR = null;
   let currentUrl = '';
+  let hotspotIp = '192.168.137.1';
+  let serverPort = window.location.port || '5000';
 
   // جلب معلومات الشبكة وتوليد QR
   async function loadNetworkInfo() {
@@ -128,6 +130,8 @@
       if (!data.success) return;
 
       currentUrl = data.student_url;
+      hotspotIp = data.hotspot_ip || hotspotIp;
+      serverPort = String(data.server_port || serverPort);
 
       // تحديث حالة الشبكة
       const bar = document.getElementById('statusBar');
@@ -150,18 +154,22 @@
       }
 
       // تحديث الرابط
-      document.getElementById('studentUrlBadge').textContent = currentUrl;
+      const studentUrlBadge = document.getElementById('studentUrlBadge');
+      if (studentUrlBadge) studentUrlBadge.textContent = currentUrl;
 
       // توليد QR
-      document.getElementById('qrContainer').innerHTML = '';
-      currentQR = new QRCode(document.getElementById('qrContainer'), {
-        text: currentUrl,
-        width: 220,
-        height: 220,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.H
-      });
+      const qrContainer = document.getElementById('qrContainer');
+      if (qrContainer && typeof QRCode !== 'undefined') {
+        qrContainer.innerHTML = '';
+        currentQR = new QRCode(qrContainer, {
+          text: currentUrl,
+          width: 220,
+          height: 220,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.H
+        });
+      }
 
     } catch (e) {
       console.error('Network info error:', e);
@@ -187,19 +195,23 @@
     sub.textContent = 'IP: 192.168.137.1 — الطلاب يتصلون بـ "حضور-QR"';
 
     // تحديث الرابط
-    currentUrl = 'http://192.168.137.1:5002';
-    document.getElementById('studentUrlBadge').textContent = currentUrl;
+    currentUrl = `http://${hotspotIp}:${serverPort}`;
+    const studentUrlBadge = document.getElementById('studentUrlBadge');
+    if (studentUrlBadge) studentUrlBadge.textContent = currentUrl;
 
     // توليد QR
-    document.getElementById('qrContainer').innerHTML = '';
-    currentQR = new QRCode(document.getElementById('qrContainer'), {
-      text: currentUrl,
-      width: 220,
-      height: 220,
-      colorDark: '#000000',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.H
-    });
+    const qrContainer = document.getElementById('qrContainer');
+    if (qrContainer && typeof QRCode !== 'undefined') {
+      qrContainer.innerHTML = '';
+      currentQR = new QRCode(qrContainer, {
+        text: currentUrl,
+        width: 220,
+        height: 220,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
   }
 
   function openWindowsHotspot() {

@@ -2,7 +2,7 @@
 تطبيق تسجيل الحضور بالـ QR
 Flask Web Application
 """
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, session, send_from_directory
+from flask import Flask, g, render_template, request, jsonify, send_file, redirect, url_for, flash, session, send_from_directory
 from functools import wraps
 import qrcode
 import io
@@ -19,12 +19,56 @@ record_attendance, record_attendance_for_subject, get_attendance_by_subject, get
     get_settings, save_settings, get_all_users, add_new_user, delete_user_by_username,
     get_students_attendance_status, get_subject_latest_attendance_date, get_subject_latest_attendance_date_before,
     get_attendance_count_by_subject_date, attendance_sync_event_exists,
-    verify_subject_qr_session_at
+    verify_subject_qr_session_at, get_client_mutation_result, save_client_mutation_result
 )
+from lan_sync import lan_sync_blueprint, start_lan_sync_worker
 
 
 app = Flask(__name__)
-app.secret_key = 'qr_attendance_secret_key_2026'
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)
+app.register_blueprint(lan_sync_blueprint)
+
+
+@app.before_request
+def replay_client_mutation():
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
+        return None
+
+    request_id = request.headers.get('X-Client-Request-ID', '').strip()
+    if not request_id or len(request_id) > 128:
+        return None
+
+    try:
+        stored = get_client_mutation_result(request_id)
+    except Exception as error:
+        print(f'[Offline Sync] Idempotency lookup unavailable: {error}')
+        return None
+
+    if stored:
+        return app.response_class(
+            stored['response_body'],
+            status=stored['status_code'],
+            content_type=stored['content_type']
+        )
+
+    g.client_mutation_request_id = request_id
+    return None
+
+
+@app.after_request
+def store_client_mutation_result(response):
+    request_id = getattr(g, 'client_mutation_request_id', None)
+    if request_id and 200 <= response.status_code < 300 and response.is_json:
+        try:
+            save_client_mutation_result(
+                request_id,
+                response.status_code,
+                response.headers.get('Content-Type', 'application/json'),
+                response.get_data(as_text=True)
+            )
+        except Exception as error:
+            print(f'[Offline Sync] Idempotency result could not be saved: {error}')
+    return response
 
 # ✅ إبقاء الجلسة لمدة 7 أيام
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
@@ -45,6 +89,8 @@ def initialize_app():
                     print(f'[Cleanup] تم حذف {deleted} جلسة QR منتهية')
             except Exception as e:
                 print(f'[Cleanup Error] {e}')
+            if start_lan_sync_worker():
+                print('[LAN Sync] Local attendance cloud replay enabled')
     except Exception as e:
         print(f'[App] ❌ Database init error: {e}')
 
@@ -844,7 +890,7 @@ def generate_qr():
         if not student:
             return jsonify({'success': False, 'message': 'خطأ: لم يتم حفظ الطالب'}), 400
 
-        print(f'[API] ✅ Student added: {full_name} ({student_code})')
+        print(f'[API] Student added: {full_name} ({student_code})')
 
         return jsonify({
             'success': True,
@@ -1624,16 +1670,18 @@ def api_network_info():
 
     # تحديد IP الطالب
     student_ip = hotspot_ip if hotspot_active else local_ip
+    server_port = request.environ.get('SERVER_PORT') or os.environ.get('PORT') or '5000'
     
     return jsonify({
         'success': True,
         'local_ip': local_ip,
         'hotspot_ip': hotspot_ip,
+        'server_port': server_port,
         'hotspot_active': hotspot_active,
         'detection_method': detection_method,
         'student_ip': student_ip,
-        'student_url': f'http://{student_ip}:5002',
-        'teacher_url': f'http://{local_ip}:5000'
+        'student_url': f'http://{student_ip}:{server_port}',
+        'teacher_url': f'http://{local_ip}:{server_port}'
     })
 
 
@@ -1671,5 +1719,5 @@ def api_stop_hotspot():
 if __name__ == '__main__':
     init_database()
     port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('RAILWAY_ENVIRONMENT') is None  # debug=False على Railway
+    debug = os.environ.get('FLASK_DEBUG', '').strip() == '1'
     app.run(debug=debug, host='0.0.0.0', port=port)

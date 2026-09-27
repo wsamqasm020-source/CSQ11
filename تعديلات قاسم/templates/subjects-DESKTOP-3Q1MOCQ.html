@@ -204,6 +204,14 @@ document.addEventListener('DOMContentLoaded', function() {
     updateStats();
 });
 
+window.addEventListener('offlineMutationSyncComplete', event => {
+    const detail = event.detail || {};
+    if (!detail.endpoint?.startsWith('/api/add-subject') &&
+        !detail.endpoint?.startsWith('/api/delete-subject/')) return;
+    if (detail.error) alert(detail.error);
+    else window.location.reload();
+});
+
 function updateStats() {
     const cards = document.querySelectorAll('.subject-card');
     const teachers = new Set();
@@ -274,27 +282,32 @@ async function addSubject() {
     }
     
     try {
-        const response = await fetch('/api/add-subject', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
+        const submission = await window.QRAttendance.submitMutation('/api/add-subject', {
+            payload: {
                 name: name,
                 department: 'عام',
                 teacher_name: teacherName,
                 grade: grade,
                 course_type: courseType
-            })
+            }
         });
-        
-        const data = await response.json();
-        
-        if (data.success) {
+
+        if (submission.queued) {
+            bootstrap.Modal.getInstance(document.getElementById('addSubjectModal')).hide();
+            document.getElementById('addSubjectForm').reset();
+            alert('حُفظ طلب إضافة المادة على هذا الجهاز وسيُرفع عند عودة الاتصال.');
+            return;
+        }
+        if (submission.error) {
+            alert('حدث خطأ: ' + submission.error);
+            return;
+        }
+
+        if (submission.result?.success) {
             bootstrap.Modal.getInstance(document.getElementById('addSubjectModal')).hide();
             location.reload();
         } else {
-            alert('حدث خطأ: ' + (data.message || 'حدث خطأ في إضافة المادة'));
+            alert('حدث خطأ في إضافة المادة');
         }
     } catch (error) {
         console.error('Error:', error);
@@ -314,13 +327,21 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async func
     if (!subjectToDelete) return;
     
     try {
-        const response = await fetch(`/api/delete-subject/${subjectToDelete}`, {
+        const submission = await window.QRAttendance.submitMutation(`/api/delete-subject/${subjectToDelete}`, {
             method: 'DELETE'
         });
-        
-        const data = await response.json();
-        
-        if (data.success) {
+
+        if (submission.queued) {
+            bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+            alert('حُفظ طلب حذف المادة على هذا الجهاز وسيُنفذ عند عودة الاتصال.');
+            return;
+        }
+        if (submission.error) {
+            alert(submission.error);
+            return;
+        }
+
+        if (submission.result?.success) {
             bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
             location.reload();
         } else {

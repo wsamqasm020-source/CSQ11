@@ -409,6 +409,14 @@
                 window.location.href = '{{ url_for("student_logout") }}';
             }
         }
+
+        document.querySelectorAll('form[method="POST"]').forEach(form => {
+            form.addEventListener('submit', event => {
+                if (navigator.onLine) return;
+                event.preventDefault();
+                alert('تغيير كلمة المرور ورفع الصورة يحتاج إلى اتصال بالخادم. لم تُحفظ أي بيانات سرية على هذا الجهاز.');
+            });
+        });
     </script>
 </body>
 </html>
