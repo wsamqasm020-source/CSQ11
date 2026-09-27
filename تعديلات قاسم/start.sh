@@ -1,8 +1,2 @@
 #!/bin/bash
-echo "=========================================="
-echo "   نظام تسجيل الحضور بالـ QR"
-echo "=========================================="
-echo ""
-echo "جاري تشغيل التطبيق..."
-echo ""
-python3 app.py
+gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120

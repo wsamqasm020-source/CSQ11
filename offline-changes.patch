@@ -1,0 +1,1065 @@
+diff --git a/app.py b/app.py
+index cc66246..c38c513 100644
+--- a/app.py
++++ b/app.py
+@@ -9,7 +9,7 @@ import io
+ import base64
+ import os
+ import hashlib
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, timezone
+ from database import (
+     init_database, add_student, get_student_by_code, get_student_by_id,
+     get_all_students, add_subject, get_all_subjects, get_subjects_by_department,
+@@ -18,7 +18,8 @@ record_attendance, record_attendance_for_subject, get_attendance_by_subject, get
+     get_student_group_name, get_last_attendance_time, verify_user, change_user_password,
+     get_settings, save_settings, get_all_users, add_new_user, delete_user_by_username,
+     get_students_attendance_status, get_subject_latest_attendance_date, get_subject_latest_attendance_date_before,
+-    get_attendance_count_by_subject_date
++    get_attendance_count_by_subject_date, attendance_sync_event_exists,
++    verify_subject_qr_session_at
+ )
+ 
+ 
+@@ -148,6 +149,35 @@ def format_remaining_time(seconds):
+     return f"{secs} ثانية"
+ 
+ 
++def parse_attendance_scan_time(data):
++    event_id = str(data.get('event_id') or '').strip()
++    if event_id:
++        import uuid
++        try:
++            event_id = str(uuid.UUID(event_id))
++        except (ValueError, AttributeError) as exc:
++            raise ValueError('معرّف مزامنة غير صالح') from exc
++
++    if not data.get('offline_sync'):
++        return event_id or None, datetime.now()
++    if not event_id:
++        raise ValueError('معرّف المزامنة مطلوب')
++
++    scanned_at_value = data.get('scanned_at')
++    try:
++        scanned_at = datetime.fromisoformat(str(scanned_at_value).replace('Z', '+00:00'))
++    except (TypeError, ValueError) as exc:
++        raise ValueError('وقت المسح غير صالح') from exc
++
++    if scanned_at.tzinfo is not None:
++        scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None)
++
++    now = datetime.now()
++    if scanned_at < now - timedelta(days=7) or scanned_at > now + timedelta(minutes=5):
++        raise ValueError('انتهت صلاحية سجل الحضور غير المتصل')
++    return event_id, scanned_at
++
++
+ # ============================================
+ # 🔥 ROUTE مهم جداً للـ Service Worker
+ # ============================================
+@@ -409,6 +439,14 @@ def student_api_scan_attendance():
+     if not data or 'qr_data' not in data:
+         return jsonify({'success': False, 'message': 'بيانات غير صالحة'}), 400
+ 
++    try:
++        event_id, scanned_at = parse_attendance_scan_time(data)
++    except ValueError as e:
++        return jsonify({'success': False, 'message': str(e)}), 400
++
++    if event_id and attendance_sync_event_exists(event_id):
++        return jsonify({'success': True, 'already_synced': True, 'message': 'تمت مزامنة الحضور مسبقاً'})
++
+     qr_data = str(data.get('qr_data', '')).strip()
+ 
+     # يجب أن يكون QR خاص بمادة
+@@ -427,7 +465,14 @@ def student_api_scan_attendance():
+     session_token = match_session.group(1) if match_session else None
+ 
+     # ✅ تحقق من صلاحية الـ session
+-    if session_token:
++    if session_token and data.get('offline_sync'):
++        if not verify_subject_qr_session_at(subject_id, session_token, scanned_at):
++            return jsonify({
++                'success': False,
++                'message': 'كان QR منتهي الصلاحية وقت المسح أو تعذر التحقق منه',
++                'expired': True
++            }), 403
++    elif session_token:
+         from database import verify_subject_qr_session
+         if not verify_subject_qr_session(subject_id, session_token):
+             return jsonify({
+@@ -459,7 +504,9 @@ def student_api_scan_attendance():
+     group_name = student.get('group_name', 'غير معروف') if student else 'غير معروف'
+ 
+     # تسجيل الحضور
+-    success = record_attendance(student_id, subject_id, group_name)
++    success = record_attendance(
++        student_id, subject_id, group_name, recorded_at=scanned_at, event_id=event_id
++    )
+ 
+     if success:
+         return jsonify({
+@@ -785,6 +832,11 @@ def api_scan_qr():
+     if not data:
+         return jsonify({'success': False, 'message': 'بيانات غير صالحة'}), 400
+ 
++    try:
++        event_id, scanned_at = parse_attendance_scan_time(data)
++    except ValueError as e:
++        return jsonify({'success': False, 'message': str(e)}), 400
++
+     qr_data = str(data.get('qr_data') or '').strip()
+     subject_id = data.get('subject_id')
+     mode = (data.get('mode') or 'student').strip().lower()
+@@ -801,6 +853,9 @@ def api_scan_qr():
+     if not qr_data:
+         return jsonify({'success': False, 'message': 'بيانات غير كاملة'}), 400
+ 
++    if event_id and attendance_sync_event_exists(event_id):
++        return jsonify({'success': True, 'already_synced': True, 'message': 'تمت مزامنة الحضور مسبقاً'})
++
+     # subject_id مطلوب فقط لـ QR الطالب
+     if not qr_data.startswith('SUBJECT:') and not subject_id:
+         return jsonify({'success': False, 'message': 'اختر المادة أولاً'}), 400
+@@ -816,7 +871,9 @@ def api_scan_qr():
+         print(f'[API] Processing QR: {qr_data}, Subject: {subject_id}, Mode: {mode}')
+ 
+         if qr_data.startswith('SUBJECT:'):
+-            subject_result = record_attendance_for_subject(subject_id, group_name='مادة')
++            subject_result = record_attendance_for_subject(
++                subject_id, group_name='مادة', recorded_at=scanned_at, event_id=event_id
++            )
+             if not subject_result.get('success'):
+                 return jsonify({'success': False, 'message': subject_result.get('message', 'فشل تسجيل حضور المادة')}), 400
+             return jsonify({
+@@ -874,7 +931,9 @@ def api_scan_qr():
+             }), 429
+ 
+         group_name = student.get('group_name', 'غير معروف')
+-        success = record_attendance(student_id, subject_id, group_name)
++        success = record_attendance(
++            student_id, subject_id, group_name, recorded_at=scanned_at, event_id=event_id
++        )
+ 
+         if success:
+             subjects = get_all_subjects() or []
+diff --git a/database.py b/database.py
+index c0a8258..c90ad17 100644
+--- a/database.py
++++ b/database.py
+@@ -6,7 +6,7 @@
+ import json
+ import hashlib
+ import os
+-from datetime import datetime
++from datetime import datetime, timezone
+ 
+ DATABASE_URL = os.environ.get('DATABASE_URL', '')
+ 
+@@ -47,6 +47,103 @@ def _autoincrement():
+ def _ignore():
+     return 'ON CONFLICT DO NOTHING' if IS_POSTGRES else 'OR IGNORE'
+ 
++
++def _migrate_sqlite_to_postgres(conn):
++    if not IS_POSTGRES:
++        return
++
++    sqlite_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'attendance.db')
++    if not os.path.isfile(sqlite_path):
++        return
++
++    import sqlite3
++    from psycopg2 import sql
++
++    cursor = conn.cursor()
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS app_migrations (
++            name TEXT PRIMARY KEY,
++            applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++        )
++    ''')
++    conn.commit()
++
++    lock_id = 74289153021
++    migration_name = 'sqlite-attendance-db-v1'
++    cursor.execute('SELECT pg_advisory_lock(%s)', (lock_id,))
++    conn.commit()
++    try:
++        cursor.execute('SELECT 1 FROM app_migrations WHERE name = %s', (migration_name,))
++        if cursor.fetchone():
++            return
++
++        tables = (
++            'students', 'subjects', 'attendance', 'users', 'settings',
++            'grades', 'access_codes', 'active_subject_qr_sessions', 'promotion_log'
++        )
++        imported_total = 0
++        source_uri = f"file:{sqlite_path.replace(os.sep, '/')}?mode=ro"
++        with sqlite3.connect(source_uri, uri=True) as source:
++            source.row_factory = sqlite3.Row
++            for table in tables:
++                exists = source.execute(
++                    'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?',
++                    ('table', table)
++                ).fetchone()
++                if not exists:
++                    continue
++
++                source_columns = [
++                    row['name'] for row in source.execute(f'PRAGMA table_info("{table}")')
++                ]
++                cursor.execute(sql.SQL('SELECT * FROM {} LIMIT 0').format(sql.Identifier(table)))
++                target_columns = {column[0] for column in cursor.description}
++                columns = [column for column in source_columns if column in target_columns]
++                if 'id' not in columns:
++                    continue
++
++                identifiers = sql.SQL(', ').join(sql.Identifier(column) for column in columns)
++                placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in columns)
++                if table == 'users':
++                    updates = [column for column in columns if column != 'id']
++                    conflict_action = sql.SQL('DO UPDATE SET {}').format(
++                        sql.SQL(', ').join(
++                            sql.SQL('{} = EXCLUDED.{}').format(sql.Identifier(column), sql.Identifier(column))
++                            for column in updates
++                        )
++                    )
++                else:
++                    conflict_action = sql.SQL('DO NOTHING')
++                insert = sql.SQL('INSERT INTO {} ({}) VALUES ({}) ON CONFLICT (id) {}').format(
++                    sql.Identifier(table), identifiers, placeholders, conflict_action
++                )
++
++                imported_rows = 0
++                for row in source.execute(f'SELECT * FROM "{table}"'):
++                    cursor.execute(insert, tuple(row[column] for column in columns))
++                    imported_rows += max(cursor.rowcount, 0)
++                imported_total += imported_rows
++                if imported_rows:
++                    print(f'[DB Migration] {table}: {imported_rows} rows')
++
++                cursor.execute('SELECT pg_get_serial_sequence(%s, %s) AS sequence_name', (table, 'id'))
++                sequence = cursor.fetchone()['sequence_name']
++                if sequence:
++                    cursor.execute(sql.SQL('SELECT MAX(id) AS max_id FROM {}').format(sql.Identifier(table)))
++                    max_id = cursor.fetchone()['max_id']
++                    if max_id is not None:
++                        cursor.execute('SELECT setval(%s, %s, true)', (sequence, max_id))
++
++        cursor.execute('INSERT INTO app_migrations (name) VALUES (%s) ON CONFLICT (name) DO NOTHING', (migration_name,))
++        conn.commit()
++        print(f'[DB Migration] SQLite import complete: {imported_total} rows')
++    except Exception:
++        conn.rollback()
++        raise
++    finally:
++        cursor.execute('SELECT pg_advisory_unlock(%s)', (lock_id,))
++        conn.commit()
++
+ def init_database():
+     """تهيئة قاعدة البيانات وإنشاء الجداول"""
+     conn = get_db_connection()
+@@ -92,6 +189,26 @@ def init_database():
+             attendance_time TIME DEFAULT CURRENT_TIME
+         )
+     ''')
++
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS attendance_sync_events (
++            event_id TEXT PRIMARY KEY,
++            student_id INTEGER,
++            subject_id INTEGER NOT NULL,
++            scanned_at TIMESTAMP NOT NULL,
++            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++        )
++    ''')
++
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS attendance_sync_events (
++            event_id TEXT PRIMARY KEY,
++            student_id INTEGER,
++            subject_id INTEGER NOT NULL,
++            scanned_at TIMESTAMP NOT NULL,
++            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++        )
++    ''')
+     
+     cursor.execute(f'''
+         CREATE TABLE IF NOT EXISTS users (
+@@ -253,6 +370,9 @@ def init_database():
+     except Exception:
+         pass
+ 
++    if IS_POSTGRES:
++        _migrate_sqlite_to_postgres(conn)
++
+     conn.close()
+ 
+ def add_student(full_name, department, teacher_name, group_name, student_code, qr_code, qr_image=None):
+@@ -391,29 +511,86 @@ def delete_subject(subject_id):
+         print(f'[DB Error] delete_subject: {e}')
+         return False
+ 
+-def record_attendance(student_id, subject_id, group_name=None):
++def attendance_sync_event_exists(event_id):
++    if not event_id:
++        return False
+     conn = get_db_connection()
+     cursor = conn.cursor()
+-    today = datetime.now().date()
++    cursor.execute(_q('SELECT 1 FROM attendance_sync_events WHERE event_id = ?'), (event_id,))
++    exists = cursor.fetchone() is not None
++    conn.close()
++    return exists
++
++
++def mark_attendance_sync_event(event_id, subject_id, scanned_at):
++    conn = get_db_connection()
++    cursor = conn.cursor()
++    values = (event_id, subject_id, scanned_at.strftime('%Y-%m-%d %H:%M:%S'))
++    if IS_POSTGRES:
++        cursor.execute('''
++            INSERT INTO attendance_sync_events (event_id, subject_id, scanned_at)
++            VALUES (%s, %s, %s) ON CONFLICT (event_id) DO NOTHING
++        ''', values)
++    else:
++        cursor.execute('''
++            INSERT OR IGNORE INTO attendance_sync_events (event_id, subject_id, scanned_at)
++            VALUES (?, ?, ?)
++        ''', values)
++    conn.commit()
++    inserted = cursor.rowcount > 0
++    conn.close()
++    return inserted
++
++
++def record_attendance(student_id, subject_id, group_name=None, recorded_at=None, event_id=None):
++    conn = get_db_connection()
++    cursor = conn.cursor()
++    scanned_at = recorded_at or datetime.now()
++    if scanned_at.tzinfo is not None:
++        scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None)
++    scanned_date = scanned_at.date().isoformat()
++    scanned_time = scanned_at.time().replace(microsecond=0).isoformat()
++
++    if event_id:
++        event_values = (event_id, student_id, subject_id, scanned_at.strftime('%Y-%m-%d %H:%M:%S'))
++        if IS_POSTGRES:
++            cursor.execute('''
++                INSERT INTO attendance_sync_events (event_id, student_id, subject_id, scanned_at)
++                VALUES (%s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING
++            ''', event_values)
++        else:
++            cursor.execute('''
++                INSERT OR IGNORE INTO attendance_sync_events (event_id, student_id, subject_id, scanned_at)
++                VALUES (?, ?, ?, ?)
++            ''', event_values)
++        if cursor.rowcount == 0:
++            conn.commit()
++            conn.close()
++            return True
++
+     cursor.execute(_q('''
+         SELECT * FROM attendance 
+         WHERE student_id = ? AND subject_id = ? AND attendance_date = ?
+-    '''), (student_id, subject_id, today))
++    '''), (student_id, subject_id, scanned_date))
+     if cursor.fetchone():
++        conn.rollback()
+         conn.close()
+         return False
+     cursor.execute(_q('''
+         INSERT INTO attendance (student_id, subject_id, group_name, attendance_date, attendance_time)
+-        VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME)
+-    '''), (student_id, subject_id, group_name))
++        VALUES (?, ?, ?, ?, ?)
++    '''), (student_id, subject_id, group_name, scanned_date, scanned_time))
+     conn.commit()
+     conn.close()
+     return True
+ 
+ 
+-def record_attendance_for_subject(subject_id, group_name=None):
++def record_attendance_for_subject(subject_id, group_name=None, recorded_at=None, event_id=None):
+     """تسجيل حضور مادة كاملة: يضيف حضور لكل طلاب نفس المادة في اليوم الحالي."""
+     try:
++        if event_id and attendance_sync_event_exists(event_id):
++            return {'success': True, 'saved': 0, 'total': 0, 'already_synced': True}
++
+         subject = None
+         for item in get_all_subjects():
+             if item.get('id') == int(subject_id):
+@@ -441,9 +618,14 @@ def record_attendance_for_subject(subject_id, group_name=None):
+ 
+         saved = 0
+         for student in matched_students:
+-            if record_attendance(student.get('id'), subject_id, group_name or student.get('group_name')):
++            if record_attendance(
++                student.get('id'), subject_id, group_name or student.get('group_name'), recorded_at
++            ):
+                 saved += 1
+ 
++        if event_id:
++            mark_attendance_sync_event(event_id, subject_id, recorded_at or datetime.now())
++
+         return {'success': True, 'saved': saved, 'total': len(matched_students), 'message': f'تم تسجيل حضور {saved} طالباً في المادة'}
+     except Exception as e:
+         print(f'[DB Error] record_attendance_for_subject: {e}')
+@@ -798,8 +980,10 @@ def create_subject_qr_session(subject_id, duration_minutes=30):
+         conn = get_db_connection()
+         cursor = conn.cursor()
+         
+-        # احذف جميع الجلسات القديمة لهذه المادة
+-        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE subject_id = ?'), (subject_id,))
++        # Keep expired QR sessions briefly so offline scans can be validated at scan time.
++        from datetime import timedelta
++        retention_cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
++        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (retention_cutoff,))
+         
+         # أنشئ جلسة جديدة بـ token فريد
+         session_token = uuid.uuid4().hex
+@@ -842,13 +1026,40 @@ def verify_subject_qr_session(subject_id, session_token):
+         return False
+ 
+ 
++def verify_subject_qr_session_at(subject_id, session_token, scanned_at):
++    """Verify that a queued scan occurred while its subject QR session was valid."""
++    try:
++        conn = get_db_connection()
++        cursor = conn.cursor()
++        cursor.execute(_q('''
++            SELECT created_at, expires_at FROM active_subject_qr_sessions
++            WHERE subject_id = ? AND session_token = ?
++        '''), (subject_id, session_token))
++        result = cursor.fetchone()
++        conn.close()
++        if not result or not result['expires_at']:
++            return False
++
++        created_at = result['created_at']
++        expires_at = result['expires_at']
++        if not isinstance(created_at, datetime):
++            created_at = datetime.fromisoformat(str(created_at))
++        if not isinstance(expires_at, datetime):
++            expires_at = datetime.fromisoformat(str(expires_at))
++        return created_at <= scanned_at <= expires_at
++    except Exception as e:
++        print(f'[DB Error] verify_subject_qr_session_at: {e}')
++        return False
++
++
+ def cleanup_expired_qr_sessions():
+     """ينظف الجلسات المنتهية من قاعدة البيانات"""
+     try:
+         conn = get_db_connection()
+         cursor = conn.cursor()
+-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+-        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (now,))
++        from datetime import timedelta
++        cutoff = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
++        cursor.execute(_q('DELETE FROM active_subject_qr_sessions WHERE expires_at <= ?'), (cutoff,))
+         deleted_count = cursor.rowcount
+         conn.commit()
+         conn.close()
+diff --git a/static/js/app.js b/static/js/app.js
+index 3a5e09a..a39e16a 100644
+--- a/static/js/app.js
++++ b/static/js/app.js
+@@ -70,7 +70,7 @@
+                 const store = transaction.objectStore('pendingAttendance');
+                 const request = store.add({
+                     ...record,
+-                    timestamp: new Date().toISOString(),
++                    timestamp: record.timestamp || new Date().toISOString(),
+                     synced: false
+                 });
+                 request.onsuccess = () => resolve(request.result);
+@@ -104,6 +104,21 @@
+             });
+         },
+ 
++        async updatePendingAttendance(id, changes) {
++            if (!this.db) await this.init();
++            return new Promise((resolve, reject) => {
++                const transaction = this.db.transaction(['pendingAttendance'], 'readwrite');
++                const store = transaction.objectStore('pendingAttendance');
++                const request = store.get(id);
++                request.onsuccess = () => {
++                    if (request.result) store.put({ ...request.result, ...changes });
++                };
++                transaction.oncomplete = () => resolve();
++                transaction.onerror = () => reject(transaction.error);
++                transaction.onabort = () => reject(transaction.error);
++            });
++        },
++
+         async saveOfflineAttendance(record) {
+             if (!this.db) await this.init();
+             return new Promise((resolve, reject) => {
+@@ -138,11 +153,34 @@
+             if (!this.db) await this.init();
+             const transaction = this.db.transaction(['students'], 'readwrite');
+             const store = transaction.objectStore('students');
++            store.clear();
+             for (const student of students) {
+                 store.put(student);
+             }
+         },
+ 
++        async cacheSubjects(subjects) {
++            if (!this.db) await this.init();
++            return new Promise((resolve, reject) => {
++                const transaction = this.db.transaction(['subjects'], 'readwrite');
++                const store = transaction.objectStore('subjects');
++                for (const subject of subjects) store.put(subject);
++                transaction.oncomplete = () => resolve();
++                transaction.onerror = () => reject(transaction.error);
++                transaction.onabort = () => reject(transaction.error);
++            });
++        },
++
++        async getCachedSubjects() {
++            if (!this.db) await this.init();
++            return new Promise((resolve, reject) => {
++                const transaction = this.db.transaction(['subjects'], 'readonly');
++                const request = transaction.objectStore('subjects').getAll();
++                request.onsuccess = () => resolve(request.result);
++                request.onerror = () => reject(request.error);
++            });
++        },
++
+         async getCachedStudents() {
+             if (!this.db) await this.init();
+             return new Promise((resolve, reject) => {
+@@ -181,7 +219,62 @@
+         }
+     }
+ 
+-    // Sync pending data when back online - SILENT MODE
++    function createEventId() {
++        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
++            return window.crypto.randomUUID();
++        }
++        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, character => {
++            const random = Math.random() * 16 | 0;
++            return (character === 'x' ? random : (random & 0x3 | 0x8)).toString(16);
++        });
++    }
++
++    function scheduleBackgroundSync() {
++        if (!('serviceWorker' in navigator)) return;
++        navigator.serviceWorker.ready.then(registration => {
++            if (registration.sync) return registration.sync.register('sync-attendance');
++        }).catch(error => console.warn('[Sync] Background sync unavailable:', error));
++    }
++
++    async function submitAttendance(endpoint, payload) {
++        await OfflineDB.init();
++        const eventId = payload.event_id || createEventId();
++        const timestamp = new Date().toISOString();
++        const queuedPayload = { ...payload, event_id: eventId };
++        const queueId = await OfflineDB.addPendingAttendance({
++            endpoint,
++            payload: queuedPayload,
++            timestamp,
++            event_id: eventId
++        });
++
++        scheduleBackgroundSync();
++        if (!navigator.onLine) return { queued: true, event_id: eventId };
++
++        try {
++            const response = await fetch(endpoint, {
++                method: 'POST',
++                credentials: 'same-origin',
++                headers: { 'Content-Type': 'application/json' },
++                body: JSON.stringify(queuedPayload)
++            });
++            const result = await response.json().catch(() => ({}));
++            if (result.success || result.already_registered || result.already_synced) {
++                await OfflineDB.markAsSynced(queueId);
++                return { queued: false, result };
++            }
++
++            if (![401, 403, 429].includes(response.status) && response.status < 500) {
++                await OfflineDB.markAsSynced(queueId);
++                return { queued: false, result, error: result.message || 'تعذر تسجيل الحضور' };
++            }
++            return { queued: true, result, event_id: eventId };
++        } catch (error) {
++            return { queued: true, error, event_id: eventId };
++        }
++    }
++
++    // Replay durable attendance records when connectivity returns.
+     async function syncPendingData() {
+         if (AppState.isSyncing || !AppState.isOnline) return;
+         
+@@ -194,23 +287,42 @@
+                 return;
+             }
+ 
+-            // مزامنة صامتة بدون إشعارات
++            let syncedCount = 0;
+             for (const record of pending) {
+                 try {
+-                    const response = await fetch('/api/scan-qr', {
++                    const endpoint = record.endpoint || '/api/scan-qr';
++                    const storedPayload = record.payload || {
++                        qr_data: record.qr_data,
++                        subject_id: record.subject_id
++                    };
++                    const eventId = storedPayload.event_id || record.event_id || createEventId();
++                    const timestamp = record.timestamp || new Date().toISOString();
++                    const payload = {
++                        ...storedPayload,
++                        event_id: eventId,
++                        offline_sync: true,
++                        scanned_at: timestamp
++                    };
++                    await OfflineDB.updatePendingAttendance(record.id, {
++                        endpoint,
++                        event_id: eventId,
++                        payload: { ...storedPayload, event_id: eventId },
++                        timestamp
++                    });
++                    const response = await fetch(endpoint, {
+                         method: 'POST',
++                        credentials: 'same-origin',
+                         headers: { 'Content-Type': 'application/json' },
+-                        body: JSON.stringify({
+-                            qr_data: record.qr_data,
+-                            subject_id: record.subject_id
+-                        })
++                        body: JSON.stringify(payload)
+                     });
+-                    
+-                    if (response.ok) {
++
++                    const result = await response.json().catch(() => ({}));
++                    if (result.success || result.already_registered || result.already_synced) {
+                         await OfflineDB.markAsSynced(record.id);
+-                        console.log('[Sync] Record synced silently:', record.id);
++                        syncedCount += 1;
++                        console.log('[Sync] Attendance synced:', record.id);
+                     } else {
+-                        console.error('[Sync] Failed to sync record:', await response.text());
++                        console.error('[Sync] Attendance remains queued:', result.message || response.status);
+                     }
+                 } catch (error) {
+                     console.error('[Sync] Network error during sync:', error);
+@@ -219,7 +331,10 @@
+             }
+             
+             AppState.lastSync = new Date();
+-            console.log('[Sync] Silent sync completed at', AppState.lastSync);
++            window.dispatchEvent(new CustomEvent('attendanceSyncComplete', {
++                detail: { synced: syncedCount, remaining: (await OfflineDB.getPendingAttendance()).length }
++            }));
++            console.log('[Sync] Completed at', AppState.lastSync, 'records:', syncedCount);
+         } finally {
+             AppState.isSyncing = false;
+         }
+@@ -236,6 +351,11 @@
+ 
+         window.addEventListener('online', handleNetworkChange);
+         window.addEventListener('offline', handleNetworkChange);
++        if ('serviceWorker' in navigator) {
++            navigator.serviceWorker.addEventListener('message', event => {
++                if (event.data && event.data.type === 'sync-attendance') syncPendingData();
++            });
++        }
+ 
+         if (navigator.onLine) {
+             syncPendingData();
+@@ -246,7 +366,8 @@
+     window.QRAttendance = {
+         AppState,
+         OfflineDB,
+-        syncPendingData
++        syncPendingData,
++        submitAttendance
+     };
+ 
+ })();
+\ No newline at end of file
+diff --git a/static/sw.js b/static/sw.js
+index 29ace5c..3d8446f 100644
+--- a/static/sw.js
++++ b/static/sw.js
+@@ -1,4 +1,4 @@
+-const CACHE_NAME = 'attendance-v9';
++const CACHE_NAME = 'attendance-v11';
+ 
+ const STATIC_ASSETS = [
+   '/offline.html',
+@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
+ ];
+ 
+ // هذه المسارات لا تُخزن في الـ cache أبداً
+-const BYPASS_PATHS = ['/logout', '/login', '/', '/student/login', '/teacher/login', '/static/uploads/'];
++const BYPASS_PATHS = ['/logout', '/login', '/student/login', '/teacher/login', '/static/uploads/'];
+ 
+ self.addEventListener('install', (event) => {
+   self.skipWaiting();
+@@ -49,7 +49,9 @@ self.addEventListener('fetch', (event) => {
+   if (event.request.method !== 'GET') return;
+ 
+   // تجاوز الـ cache لهذه المسارات
+-  const shouldBypass = BYPASS_PATHS.some(p => url.pathname === p || url.pathname.startsWith(p));
++  const shouldBypass = BYPASS_PATHS.some(p =>
++    url.pathname === p || url.pathname.startsWith(p.endsWith('/') ? p : `${p}/`)
++  );
+   if (shouldBypass) return;
+ 
+   if (url.pathname.startsWith('/api/')) return;
+@@ -58,7 +60,7 @@ self.addEventListener('fetch', (event) => {
+     event.respondWith(
+       fetch(event.request)
+         .then(response => {
+-          if (response && response.ok && response.status === 200) {
++          if (response && response.ok && response.status === 200 && new URL(response.url).pathname === url.pathname) {
+             const responseClone = response.clone();
+             caches.open(CACHE_NAME).then(c => c.put(event.request, responseClone));
+           }
+@@ -94,7 +96,13 @@ self.addEventListener('message', (event) => {
+ });
+ 
+ self.addEventListener('sync', (event) => {
+-  if (event.tag === 'sync-attendance') event.waitUntil(Promise.resolve());
++  if (event.tag === 'sync-attendance') {
++    event.waitUntil(
++      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
++        clients.forEach(client => client.postMessage({ type: 'sync-attendance' }));
++      })
++    );
++  }
+ });
+ 
+-console.log('[SW] v9 loaded');
++console.log('[SW] v11 loaded');
+diff --git a/templates/base.html b/templates/base.html
+index 76eecb8..c52450e 100644
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -41,7 +41,7 @@
+     <link rel="preconnect" href="https://unpkg.com" crossorigin>
+     
+     <!-- Bootstrap RTL -->
+-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css" integrity="sha384-nU14brUcp6StFntEOOEBvcJm4huWjB0OcIeQ3fltAfSmuZFrkAif0T+UtNGlKKQv" crossorigin="anonymous">
++    <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+     
+     <!-- Font Awesome -->
+     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer">
+@@ -634,15 +634,13 @@
+     </footer>
+ 
+     <!-- External Scripts -->
+-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" 
+-            integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" 
+-            crossorigin="anonymous"></script>
++    <script src="/static/js/bootstrap.bundle.min.js"></script>
+     
+     <!-- SweetAlert2 - محملة مرة وحدة للكل الصفحات -->
+     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+     
+     <!-- html5-qrcode for QR scanning -->
+-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
++    <script src="/static/js/html5-qrcode.min.js"></script>
+     
+     <!-- App JavaScript -->
+     <script src="/static/js/app.js"></script>
+diff --git a/templates/scanner.html b/templates/scanner.html
+index 9b18f4a..fb4dc08 100644
+--- a/templates/scanner.html
++++ b/templates/scanner.html
+@@ -142,17 +142,63 @@
+ 
+     document.addEventListener('DOMContentLoaded', function() {
+         loadAllSubjects();
++        cacheStudentsForOffline();
+         if (window.Html5Qrcode) {
+             html5QrCode = new Html5Qrcode('reader');
+         }
+     });
+ 
++    window.addEventListener('attendanceSyncComplete', event => {
++        const detail = event.detail || {};
++        if (detail.synced) showToast(`تمت مزامنة ${detail.synced} سجل حضور`, 'success');
++        else if (detail.remaining) showToast(`بقي ${detail.remaining} سجل بانتظار المزامنة`, 'warning');
++    });
++
+     async function loadAllSubjects() {
+         try {
+             const res = await fetch('/api/get-subjects');
+             const data = await res.json();
+-            if (data.success) allSubjects = data.subjects || [];
+-        } catch (e) { console.error(e); }
++            if (!res.ok || !data.success) throw new Error(data.message || 'تعذر تحميل المواد');
++            allSubjects = data.subjects || [];
++            await window.QRAttendance?.OfflineDB.cacheSubjects(allSubjects);
++            return;
++        } catch (e) {
++            console.warn('[Scanner] Loading cached subjects:', e);
++        }
++
++        try {
++            allSubjects = await window.QRAttendance?.OfflineDB.getCachedSubjects() || [];
++            if (!allSubjects.length) {
++                showToast('افتح الماسح مرة واحدة وأنت متصل لتحميل المواد للاستخدام دون إنترنت', 'warning');
++            }
++        } catch (e) {
++            showToast('تعذر تحميل المواد المحفوظة على هذا الجهاز', 'error');
++        }
++    }
++
++    async function getStudentsForScanner() {
++        const offlineDB = window.QRAttendance.OfflineDB;
++        try {
++            const response = await fetch('/api/get-students');
++            const data = await response.json();
++            if (!response.ok || !data.success) throw new Error(data.message || 'تعذر تحميل الطلاب');
++            const students = (data.students || []).map(student => ({
++                id: student.id,
++                full_name: student.full_name,
++                student_code: student.student_code,
++                qr_code: student.qr_code,
++                group_name: student.group_name
++            }));
++            await offlineDB.cacheStudents(students);
++            return students;
++        } catch (error) {
++            console.warn('[Scanner] Loading cached students:', error);
++            return offlineDB.getCachedStudents();
++        }
++    }
++
++    function cacheStudentsForOffline() {
++        getStudentsForScanner().catch(error => console.warn('[Scanner] Student cache unavailable:', error));
+     }
+ 
+     // ============================================
+@@ -268,51 +314,52 @@
+     // ============================================
+     // ماسح QR الطالب
+     // ============================================
+-    function searchStudentByName() {
++    async function searchStudentByName() {
+         const name = document.getElementById('manualStudentName').value.trim();
+         const subjectId = document.getElementById('subjectSelect').value;
+         if (!subjectId) { showToast('اختر المادة أولاً', 'warning'); return; }
+         if (!name) { showToast('اكتب اسم الطالب أولاً', 'warning'); return; }
+ 
+-        fetch('/api/get-students')
+-            .then(r => r.json())
+-            .then(data => {
+-                if (!data.success) throw new Error(data.message);
+-                const matched = (data.students || []).find(s => s.full_name && s.full_name.includes(name));
+-                if (!matched) { showToast('لم يتم العثور على طالب بهذا الاسم', 'warning'); return; }
+-                document.getElementById('manualStudentName').value = matched.full_name;
+-                showToast(`تم العثور على: ${matched.full_name}`, 'success');
+-            })
+-            .catch(err => showToast(err.message || 'تعذر البحث', 'error'));
++        try {
++            const students = await getStudentsForScanner();
++            const matched = students.find(student => student.full_name && student.full_name.includes(name));
++            if (!matched) { showToast('لم يتم العثور على طالب بهذا الاسم', 'warning'); return; }
++            document.getElementById('manualStudentName').value = matched.full_name;
++            showToast(`تم العثور على: ${matched.full_name}`, 'success');
++        } catch (error) {
++            showToast(error.message || 'تعذر البحث', 'error');
++        }
+     }
+ 
+-    function submitManualAttendance() {
++    async function submitManualAttendance() {
+         const subjectId = document.getElementById('subjectSelect').value;
+         const studentName = document.getElementById('manualStudentName').value.trim();
+         if (!subjectId) { showToast('اختر المادة أولاً', 'warning'); return; }
+         if (!studentName) { showToast('اكتب اسم الطالب أو ابحث عنه أولاً', 'warning'); return; }
+ 
+-        fetch('/api/get-students')
+-            .then(r => r.json())
+-            .then(data => {
+-                if (!data.success) throw new Error(data.message);
+-                const matched =
+-                    (data.students || []).find(s => s.full_name && s.full_name.toLowerCase() === studentName.toLowerCase()) ||
+-                    (data.students || []).find(s => s.full_name && s.full_name.includes(studentName));
+-                if (!matched) { showToast('الطالب غير موجود', 'warning'); return null; }
+-                return fetch('/api/scan-qr', {
+-                    method: 'POST',
+-                    headers: { 'Content-Type': 'application/json' },
+-                    body: JSON.stringify({ qr_data: matched.qr_code, subject_id: Number(subjectId) })
+-                });
+-            })
+-            .then(r => r ? r.json() : null)
+-            .then(result => {
+-                if (!result) return;
+-                if (!result.success) throw new Error(result.message);
+-                showToast(result.message || 'تم تسجيل الحضور بنجاح', 'success');
+-            })
+-            .catch(err => showToast(err.message || 'تعذر تسجيل الحضور', 'error'));
++        try {
++            const students = await getStudentsForScanner();
++            const matched =
++                students.find(student => student.full_name && student.full_name.toLowerCase() === studentName.toLowerCase()) ||
++                students.find(student => student.full_name && student.full_name.includes(studentName));
++            if (!matched) { showToast('الطالب غير موجود', 'warning'); return; }
++
++            const submission = await window.QRAttendance.submitAttendance('/api/scan-qr', {
++                qr_data: matched.qr_code,
++                subject_id: Number(subjectId)
++            });
++            if (submission.queued) {
++                showToast('حُفظ الحضور على هذا الجهاز، وسيُرفع تلقائياً عند رجوع الإنترنت', 'info');
++            } else if (submission.error) {
++                showToast(submission.error, 'error');
++            } else if (submission.result.already_registered) {
++                showToast(submission.result.message || 'الحضور مسجل مسبقاً', 'warning');
++            } else {
++                showToast(submission.result.message || 'تم تسجيل الحضور بنجاح', 'success');
++            }
++        } catch (error) {
++            showToast(error.message || 'تعذر تسجيل الحضور', 'error');
++        }
+     }
+ 
+     async function toggleScanner() {
+@@ -354,7 +401,7 @@
+         isProcessing = true;
+ 
+         const subjectId = document.getElementById('subjectSelect').value;
+-        Swal.fire({
++        if (window.Swal) Swal.fire({
+             title: 'جاري تسجيل الحضور...',
+             allowOutsideClick: false,
+             showConfirmButton: false,
+@@ -363,26 +410,38 @@
+ 
+         try {
+             const isSubjectMode = decodedText.startsWith('SUBJECT:');
+-            const res = await fetch('/api/scan-qr', {
+-                method: 'POST',
+-                headers: { 'Content-Type': 'application/json' },
+-                body: JSON.stringify({
++            const submission = await window.QRAttendance.submitAttendance('/api/scan-qr', {
+                     qr_data: decodedText,
+                     subject_id: Number(subjectId),
+                     mode: isSubjectMode ? 'subject' : 'student'
+-                })
+             });
+-            const data = await res.json();
++            if (submission.queued) {
++                showToast('حُفظ الحضور على هذا الجهاز، وسيُرفع تلقائياً عند رجوع الإنترنت', 'info');
++                return;
++            }
++            if (submission.error) throw new Error(submission.error);
++            const data = submission.result;
++            if (data.already_registered) {
++                showToast(data.message || 'الحضور مسجل مسبقاً', 'warning');
++                return;
++            }
+             if (!data.success) throw new Error(data.message);
+             showToast(data.message, 'success');
+         } catch (err) {
+             showToast(err.message || 'تعذر تسجيل الحضور', 'error');
+         } finally {
+-            setTimeout(() => { Swal.close(); isProcessing = false; }, 800);
++            setTimeout(() => {
++                if (window.Swal) Swal.close();
++                isProcessing = false;
++            }, 800);
+         }
+     }
+ 
+     function showToast(message, type = 'success') {
++        if (!window.Swal) {
++            window.alert(message);
++            return;
++        }
+         const colors = { success: '#28a745', error: '#dc3545', warning: '#ffc107', info: '#17a2b8' };
+         Swal.fire({
+             title: { success: '✅ نجاح', error: '❌ خطأ', warning: '⚠️ تنبيه', info: 'ℹ️ معلومة' }[type] || 'تنبيه',
+diff --git a/templates/student_scan.html b/templates/student_scan.html
+index a44c50b..e2454a7 100644
+--- a/templates/student_scan.html
++++ b/templates/student_scan.html
+@@ -3,9 +3,11 @@
+ <head>
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
++    <meta name="theme-color" content="#11998e">
++    <link rel="manifest" href="/static/manifest.json">
+     <title>تسجيل الحضور - {{ student.full_name }}</title>
+ 
+-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.rtl.min.css">
++    <link rel="stylesheet" href="/static/css/bootstrap.min.css">
+     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+ 
+@@ -154,14 +156,31 @@
+     </div>
+ </div>
+ 
+-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
++<script src="/static/js/app.js"></script>
++<script src="/static/js/html5-qrcode.min.js"></script>
++<script>
++    if ('serviceWorker' in navigator) {
++        window.addEventListener('load', () => {
++            navigator.serviceWorker.register('/sw.js', { scope: '/' })
++                .catch(error => console.warn('[PWA] Student scanner service worker failed:', error));
++        });
++    }
++</script>
+ 
+ <script>
+     let scanner = null;
+     let scanning = false;
+     let processing = false;
+ 
++    window.addEventListener('attendanceSyncComplete', event => {
++        const detail = event.detail || {};
++        if (detail.synced) {
++            showResult('success', '☁️', 'تمت مزامنة الحضور', `تم رفع ${detail.synced} سجل للسحابة`);
++        } else if (detail.remaining) {
++            showResult('warning', '⏳', 'المزامنة معلّقة', `بقي ${detail.remaining} سجل بانتظار المحاولة`);
++        }
++    });
++
+     async function startScan() {
+         if (scanning) return;
+ 
+@@ -219,17 +238,24 @@
+         document.getElementById('procOverlay').style.display = 'flex';
+ 
+         try {
+-            const res = await fetch('/student/api/scan-attendance', {
+-                method: 'POST',
+-                headers: { 'Content-Type': 'application/json' },
+-                body: JSON.stringify({ qr_data: text })
+-            });
+-            const data = await res.json();
++            const submission = await window.QRAttendance.submitAttendance(
++                '/student/api/scan-attendance',
++                { qr_data: text }
++            );
+             document.getElementById('procOverlay').style.display = 'none';
+ 
++            if (submission.queued) {
++                showResult('warning', '⏳', 'حضورك محفوظ على الجهاز',
++                    'سيتم إرساله تلقائياً عند رجوع الإنترنت');
++                return;
++            }
++            if (submission.error) throw new Error(submission.error);
++            const data = submission.result;
+             if (data.success) {
+                 showResult('success', '✅', 'تم تسجيل حضورك!',
+                     'المادة: ' + (data.subject_name || '—'));
++            } else if (data.already_registered) {
++                showResult('warning', '📋', 'مسجل مسبقاً', data.message || 'الحضور مسجل مسبقاً');
+             } else {
+                 const already = data.already_registered;
+                 showResult(

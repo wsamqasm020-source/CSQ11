@@ -1,0 +1,64 @@
+diff --git a/app.py b/app.py
+index c38c513..dcfc8f3 100644
+--- a/app.py
++++ b/app.py
+@@ -169,11 +169,9 @@ def parse_attendance_scan_time(data):
+     except (TypeError, ValueError) as exc:
+         raise ValueError('وقت المسح غير صالح') from exc
+ 
+-    if scanned_at.tzinfo is not None:
+-        scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None)
+-
+     now = datetime.now()
+-    if scanned_at < now - timedelta(days=7) or scanned_at > now + timedelta(minutes=5):
++    utc_scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
++    if utc_scanned_at < now - timedelta(days=7) or utc_scanned_at > now + timedelta(minutes=5):
+         raise ValueError('انتهت صلاحية سجل الحضور غير المتصل')
+     return event_id, scanned_at
+ 
+diff --git a/database.py b/database.py
+index c90ad17..992259f 100644
+--- a/database.py
++++ b/database.py
+@@ -525,7 +525,8 @@ def attendance_sync_event_exists(event_id):
+ def mark_attendance_sync_event(event_id, subject_id, scanned_at):
+     conn = get_db_connection()
+     cursor = conn.cursor()
+-    values = (event_id, subject_id, scanned_at.strftime('%Y-%m-%d %H:%M:%S'))
++    event_time = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
++    values = (event_id, subject_id, event_time.strftime('%Y-%m-%d %H:%M:%S'))
+     if IS_POSTGRES:
+         cursor.execute('''
+             INSERT INTO attendance_sync_events (event_id, subject_id, scanned_at)
+@@ -546,13 +547,13 @@ def record_attendance(student_id, subject_id, group_name=None, recorded_at=None,
+     conn = get_db_connection()
+     cursor = conn.cursor()
+     scanned_at = recorded_at or datetime.now()
+-    if scanned_at.tzinfo is not None:
+-        scanned_at = scanned_at.astimezone(timezone.utc).replace(tzinfo=None)
+-    scanned_date = scanned_at.date().isoformat()
+-    scanned_time = scanned_at.time().replace(microsecond=0).isoformat()
++    scan_local = scanned_at
++    event_time = scanned_at.astimezone(timezone.utc).replace(tzinfo=None) if scanned_at.tzinfo else scanned_at
++    scanned_date = scan_local.date().isoformat()
++    scanned_time = scan_local.time().replace(tzinfo=None, microsecond=0).isoformat()
+ 
+     if event_id:
+-        event_values = (event_id, student_id, subject_id, scanned_at.strftime('%Y-%m-%d %H:%M:%S'))
++        event_values = (event_id, student_id, subject_id, event_time.strftime('%Y-%m-%d %H:%M:%S'))
+         if IS_POSTGRES:
+             cursor.execute('''
+                 INSERT INTO attendance_sync_events (event_id, student_id, subject_id, scanned_at)
+diff --git a/static/js/app.js b/static/js/app.js
+index a39e16a..cc4b093 100644
+--- a/static/js/app.js
++++ b/static/js/app.js
+@@ -264,7 +264,7 @@
+                 return { queued: false, result };
+             }
+ 
+-            if (![401, 403, 429].includes(response.status) && response.status < 500) {
++            if (response.status < 500) {
+                 await OfflineDB.markAsSynced(queueId);
+                 return { queued: false, result, error: result.message || 'تعذر تسجيل الحضور' };
+             }

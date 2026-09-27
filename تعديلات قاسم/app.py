@@ -30,17 +30,26 @@ app.secret_key = 'qr_attendance_secret_key_2026'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['SESSION_PERMANENT'] = True
 
-# ✅ تهيئة قاعدة البيانات عند بدء التشغيل
-with app.app_context():
-    init_database()
-    # تنظيف الجلسات المنتهية
+# ✅ تهيئة قاعدة البيانات - تشغيل في background بعد بدء الـ server
+import threading
+
+def initialize_app():
     try:
-        from database import cleanup_expired_qr_sessions
-        deleted = cleanup_expired_qr_sessions()
-        if deleted > 0:
-            print(f'[Cleanup] تم حذف {deleted} جلسة QR منتهية')
+        with app.app_context():
+            init_database()
+            print('[App] ✅ Database initialized successfully')
+            try:
+                from database import cleanup_expired_qr_sessions
+                deleted = cleanup_expired_qr_sessions()
+                if deleted > 0:
+                    print(f'[Cleanup] تم حذف {deleted} جلسة QR منتهية')
+            except Exception as e:
+                print(f'[Cleanup Error] {e}')
     except Exception as e:
-        print(f'[Cleanup Error] {e}')
+        print(f'[App] ❌ Database init error: {e}')
+
+# تشغيل init في thread منفصل حتى لا يعيق بدء gunicorn
+threading.Thread(target=initialize_app, daemon=True).start()
 
 # فترة المنع بين تسجيلات الحضور (بالدقائق)
 COOLDOWN_MINUTES = 15
@@ -170,6 +179,12 @@ def parse_attendance_scan_time(data):
 # ============================================
 # 🔥 ROUTE مهم جداً للـ Service Worker
 # ============================================
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint لـ Railway"""
+    return jsonify({'status': 'ok', 'message': 'running'}), 200
+
 
 @app.route('/sw.js')
 def service_worker():
