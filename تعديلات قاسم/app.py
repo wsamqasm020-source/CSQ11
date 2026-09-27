@@ -789,7 +789,40 @@ def generate_qr():
             return jsonify({'success': False, 'message': 'يرجى اختيار المرحلة والمادة والكورس بشكل صحيح'}), 400
 
         import uuid
-        student_code = str(uuid.uuid4())[:8].upper()
+        requested_student_code = (data.get('student_code') or '').strip().upper()
+        if requested_student_code and (
+            not requested_student_code.isascii()
+            or not requested_student_code.isalnum()
+            or not 8 <= len(requested_student_code) <= 32
+        ):
+            return jsonify({'success': False, 'message': 'رمز الطالب غير صالح'}), 400
+
+        student_code = requested_student_code or str(uuid.uuid4())[:8].upper()
+
+        if requested_student_code:
+            existing_student = get_student_by_code(student_code)
+            if existing_student:
+                same_student = all(existing_student.get(key) == value for key, value in (
+                    ('full_name', full_name),
+                    ('department', department),
+                    ('teacher_name', teacher_name),
+                    ('group_name', group_name)
+                ))
+                if not same_student:
+                    return jsonify({'success': False, 'message': 'رمز الطالب مستخدم مسبقاً'}), 409
+
+                existing_image = generate_qr_code(existing_student.get('qr_code') or '')
+                existing_buffer = io.BytesIO()
+                existing_image.save(existing_buffer, format='PNG')
+                existing_base64 = base64.b64encode(existing_buffer.getvalue()).decode()
+                return jsonify({
+                    'success': True,
+                    'qr_code': f"data:image/png;base64,{existing_base64}",
+                    'student_code': student_code,
+                    'student': existing_student,
+                    'message': 'تمت استعادة الطالب المحفوظ مسبقاً',
+                    'mode': 'student'
+                })
 
         qr_content = f"CODE:{student_code}|NAME:{full_name}|DEPT:{department}|TEACHER:{teacher_name}|GROUP:{group_name}"
         if subject_id:

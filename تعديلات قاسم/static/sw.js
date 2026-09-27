@@ -1,4 +1,4 @@
-const CACHE_NAME = 'attendance-v12';
+const CACHE_NAME = 'attendance-v14';
 
 const STATIC_ASSETS = [
   '/offline.html',
@@ -15,9 +15,7 @@ const BYPASS_PATHS = [
   '/logout',
   '/login',
   '/student/login',
-  '/teacher/login',
-  '/generate',
-  '/static/uploads/'
+  '/teacher/login'
 ];
 
 const OFFLINE_FALLBACK_PATH = '/offline.html';

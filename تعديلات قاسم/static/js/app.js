@@ -10,6 +10,7 @@
     const AppState = {
         isOnline: navigator.onLine,
         isSyncing: false,
+        isSyncingStudents: false,
         pendingSync: [],
         lastSync: null
     };
@@ -17,7 +18,7 @@
     // Database wrapper for offline storage
     const OfflineDB = {
         dbName: 'QRAttendanceDB',
-        dbVersion: 2,
+        dbVersion: 3,
         db: null,
 
         async init() {
@@ -58,6 +59,10 @@
                         const store = db.createObjectStore('offlineAttendance', { keyPath: 'id', autoIncrement: true });
                         store.createIndex('timestamp', 'timestamp', { unique: false });
                         store.createIndex('synced', 'synced', { unique: false });
+                    }
+
+                    if (!db.objectStoreNames.contains('pendingStudents')) {
+                        db.createObjectStore('pendingStudents', { keyPath: 'requestId' });
                     }
                 };
             });
@@ -202,6 +207,38 @@
                 request.onsuccess = () => resolve(request.result);
                 request.onerror = () => reject(request.error);
             });
+        },
+
+        async addPendingStudent(record) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['pendingStudents'], 'readwrite');
+                transaction.objectStore('pendingStudents').put(record);
+                transaction.oncomplete = () => resolve(record);
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
+        },
+
+        async getPendingStudents() {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const request = this.db.transaction(['pendingStudents'], 'readonly')
+                    .objectStore('pendingStudents').getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        },
+
+        async removePendingStudent(requestId) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['pendingStudents'], 'readwrite');
+                transaction.objectStore('pendingStudents').delete(requestId);
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
         }
     };
 
@@ -214,6 +251,7 @@
         if (AppState.isOnline) {
             console.log('[App] Connection restored');
             syncPendingData();
+            syncPendingStudents();
         } else {
             console.log('[App] Connection lost');
         }
@@ -264,13 +302,92 @@
                 return { queued: false, result };
             }
 
-            if (response.status < 500) {
+            if (response.status < 500 && !response.redirected &&
+                response.headers.get('content-type')?.includes('application/json')) {
                 await OfflineDB.markAsSynced(queueId);
                 return { queued: false, result, error: result.message || 'تعذر تسجيل الحضور' };
             }
             return { queued: true, result, event_id: eventId };
         } catch (error) {
             return { queued: true, error, event_id: eventId };
+        }
+    }
+
+    async function submitStudentRegistration(payload) {
+        await OfflineDB.init();
+        const requestId = payload.student_code;
+        await OfflineDB.addPendingStudent({
+            requestId,
+            endpoint: '/api/generate-qr',
+            payload,
+            timestamp: new Date().toISOString()
+        });
+        scheduleBackgroundSync();
+
+        if (!navigator.onLine) return { queued: true, requestId };
+
+        try {
+            const response = await fetch('/api/generate-qr', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json().catch(() => ({}));
+            if (response.ok && result.success) {
+                await OfflineDB.removePendingStudent(requestId);
+                return { queued: false, result };
+            }
+            if (response.status !== 401 && response.status < 500 && !response.redirected &&
+                response.headers.get('content-type')?.includes('application/json')) {
+                await OfflineDB.removePendingStudent(requestId);
+                return { queued: false, error: result.message || 'تعذر حفظ الطالب' };
+            }
+            return { queued: true, requestId };
+        } catch (error) {
+            return { queued: true, requestId, error };
+        }
+    }
+
+    async function syncPendingStudents() {
+        if (AppState.isSyncingStudents || !navigator.onLine) return;
+        AppState.isSyncingStudents = true;
+
+        try {
+            const pending = await OfflineDB.getPendingStudents();
+            for (const record of pending) {
+                try {
+                    const response = await fetch(record.endpoint || '/api/generate-qr', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(record.payload)
+                    });
+                    const result = await response.json().catch(() => ({}));
+
+                    if (response.ok && result.success) {
+                        await OfflineDB.removePendingStudent(record.requestId);
+                        window.dispatchEvent(new CustomEvent('studentRegistrationSyncComplete', {
+                            detail: { requestId: record.requestId, result }
+                        }));
+                        continue;
+                    }
+
+                    if (response.status !== 401 && response.status < 500 && !response.redirected &&
+                        response.headers.get('content-type')?.includes('application/json')) {
+                        await OfflineDB.removePendingStudent(record.requestId);
+                        window.dispatchEvent(new CustomEvent('studentRegistrationSyncComplete', {
+                            detail: { requestId: record.requestId, error: result.message || 'تعذر حفظ الطالب' }
+                        }));
+                    }
+                    break;
+                } catch (error) {
+                    console.warn('[Sync] Student registration remains queued:', error);
+                    break;
+                }
+            }
+        } finally {
+            AppState.isSyncingStudents = false;
         }
     }
 
@@ -353,12 +470,29 @@
         window.addEventListener('offline', handleNetworkChange);
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.addEventListener('message', event => {
-                if (event.data && event.data.type === 'sync-attendance') syncPendingData();
+                if (event.data && event.data.type === 'sync-attendance') {
+                    syncPendingData();
+                    syncPendingStudents();
+                }
             });
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && navigator.onLine) {
+                syncPendingData();
+                syncPendingStudents();
+            }
+        });
+        window.setInterval(() => {
+            if (navigator.onLine) {
+                syncPendingData();
+                syncPendingStudents();
+            }
+        }, 60000);
+
         if (navigator.onLine) {
             syncPendingData();
+            syncPendingStudents();
         }
     });
 
@@ -367,7 +501,9 @@
         AppState,
         OfflineDB,
         syncPendingData,
-        submitAttendance
+        submitAttendance,
+        submitStudentRegistration,
+        syncPendingStudents
     };
 
 })();

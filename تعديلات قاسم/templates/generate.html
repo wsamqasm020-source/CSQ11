@@ -67,7 +67,7 @@
                 <div id="resultSection" class="d-none mt-4">
                     <hr class="my-4">
                     <div class="row">
-                        <div class="col-md-6 text-center">
+                        <div class="col-md-6 text-center" id="qrResult">
                             <h5 class="mb-3">QR Code</h5>
                             <div class="qr-container">
                                 <img id="qrImage" src="" alt="QR Code" class="img-fluid">
@@ -93,7 +93,7 @@
                                 <p><strong><i class="fas fa-book-open me-2"></i>نوع الدراسة:</strong>
                                    <span id="studentGroup"></span></p>
                             </div>
-                            <div class="alert alert-success mt-3">
+                            <div class="alert alert-success mt-3" id="registrationStatus">
                                 <i class="fas fa-check-circle me-2"></i>
                                 تم حفظ بيانات الطالب بنجاح!
                             </div>
@@ -180,6 +180,50 @@
 <script>
 let currentQRData = null;
 
+window.addEventListener('studentRegistrationSyncComplete', event => {
+    const detail = event.detail || {};
+    if (currentQRData && detail.requestId !== currentQRData.student_code) return;
+    if (detail.error) {
+        showToast(detail.error, 'error');
+        return;
+    }
+    const payload = currentQRData?.payload || detail.result?.student;
+    if (!payload) return;
+    showStudentResult(detail.result, payload, false);
+    showToast('تمت مزامنة الطالب إلى السحابة', 'success');
+});
+
+window.addEventListener('DOMContentLoaded', async () => {
+    if (!window.QRAttendance) return;
+    const pending = await window.QRAttendance.OfflineDB.getPendingStudents();
+    const latest = pending[pending.length - 1];
+    if (!latest) return;
+    showStudentResult(null, latest.payload, true);
+    document.getElementById('registrationStatus').textContent += ` (${pending.length} بانتظار المزامنة)`;
+});
+
+function showStudentResult(data, payload, queued) {
+    currentQRData = queued ? { student_code: payload.student_code, payload } : data;
+    document.getElementById('studentCode').textContent = payload.student_code;
+    document.getElementById('studentName').textContent = payload.full_name || 'طالب';
+    document.getElementById('studentTeacher').textContent = payload.teacher_name;
+    document.getElementById('studentGroup').textContent = payload.group_name;
+
+    const qrResult = document.getElementById('qrResult');
+    const status = document.getElementById('registrationStatus');
+    if (queued) {
+        qrResult.classList.add('d-none');
+        status.className = 'alert alert-warning mt-3';
+        status.textContent = 'حُفظ الطالب على هذا الجهاز. سيُرفع تلقائياً إلى السحابة عند عودة الإنترنت. رمز QR سيظهر بعد المزامنة.';
+    } else {
+        qrResult.classList.remove('d-none');
+        document.getElementById('qrImage').src = data.qr_code;
+        status.className = 'alert alert-success mt-3';
+        status.textContent = 'تم حفظ بيانات الطالب في السحابة بنجاح!';
+    }
+    document.getElementById('resultSection').classList.remove('d-none');
+}
+
 document.getElementById('generateForm').addEventListener('submit', async function(e) {
     e.preventDefault();
 
@@ -196,29 +240,25 @@ document.getElementById('generateForm').addEventListener('submit', async functio
     document.getElementById('generateBtn').disabled = true;
 
     try {
-        const response = await fetch('/api/generate-qr', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                qr_mode: 'student',
-                full_name: document.getElementById('fullName').value.trim(),
-                department: 'الأمن السيبراني',
-                teacher_name: teacherName,
-                group_name: groupName
-            })
-        });
+        const payload = {
+            qr_mode: 'student',
+            student_code: window.crypto?.randomUUID
+                ? window.crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()
+                : `${Date.now()}${Math.random().toString(36).slice(2, 8)}`.toUpperCase(),
+            full_name: document.getElementById('fullName').value.trim(),
+            department: 'الأمن السيبراني',
+            teacher_name: teacherName,
+            group_name: groupName
+        };
+        const submission = await window.QRAttendance.submitStudentRegistration(payload);
+        if (submission.queued) {
+            showStudentResult(null, payload, true);
+            showToast('تم الحفظ على الجهاز بانتظار الاتصال', 'warning');
+            return;
+        }
+        if (submission.error) throw new Error(submission.error);
 
-        const data = await response.json();
-        if (!data.success) throw new Error(data.message || 'حدث خطأ في الخادم');
-
-        currentQRData = data;
-        document.getElementById('qrImage').src       = data.qr_code;
-        document.getElementById('studentCode').textContent   = data.student_code;
-        document.getElementById('studentName').textContent   = document.getElementById('fullName').value;
-        document.getElementById('studentTeacher').textContent = teacherName;
-        document.getElementById('studentGroup').textContent  = groupName;
-
-        document.getElementById('resultSection').classList.remove('d-none');
+        showStudentResult(submission.result, payload, false);
         document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
         showToast('تم حفظ بيانات الطالب بنجاح!', 'success');
 
@@ -252,6 +292,10 @@ function printCard() {
 }
 
 function showToast(message, type = 'success') {
+    if (typeof Swal === 'undefined') {
+        console.info('[Registration]', message);
+        return;
+    }
     Swal.mixin({
         toast: true,
         position: 'top-start',
