@@ -20,93 +20,127 @@ const BYPASS_PATHS = [
   '/static/uploads/'
 ];
 
+const OFFLINE_FALLBACK_PATH = '/offline.html';
+
+function shouldBypass(pathname) {
+  return BYPASS_PATHS.some((p) => {
+    if (pathname === p) return true;
+    if (p.endsWith('/')) return pathname.startsWith(p);
+    return pathname === p || pathname.startsWith(`${p}/`);
+  });
+}
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
+
   event.waitUntil(
-    caches.open(CACHE_NAME).then(async (cache) => {
-      for (const url of STATIC_ASSETS) {
-        try {
-          const r = await fetch(url, { cache: 'no-cache' });
-          if (r.ok) {
-            const rClone = r.clone();
-            await cache.put(url, rClone);
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      await Promise.all(
+        STATIC_ASSETS.map(async (url) => {
+          try {
+            const response = await fetch(url, { cache: 'no-cache' });
+            if (response && response.ok) {
+              await cache.put(url, response.clone());
+            }
+          } catch (error) {
+            console.warn('[SW] Cache skip:', url, error);
           }
-        } catch (e) {}
-      }
-    })
+        })
+      );
+    })()
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    Promise.all([
-      self.clients.claim(),
-      caches.keys().then(keys =>
-        Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-      )
-    ])
+    (async () => {
+      await self.clients.claim();
+      const cacheNames = await caches.keys();
+      await Promise.all(
+        cacheNames
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      );
+    })()
   );
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (url.origin !== location.origin) return;
-  if (event.request.method !== 'GET') return;
-
-  // تجاوز الـ cache لهذه المسارات
-  const shouldBypass = BYPASS_PATHS.some(p =>
-    url.pathname === p || url.pathname.startsWith(p.endsWith('/') ? p : `${p}/`)
-  );
-  if (shouldBypass) return;
-
+  if (shouldBypass(url.pathname)) return;
   if (url.pathname.startsWith('/api/')) return;
 
-  if (event.request.mode === 'navigate') {
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request)
-        .then(response => {
-          if (response && response.ok && response.status === 200 && new URL(response.url).pathname === url.pathname) {
-            const responseClone = response.clone();
-            caches.open(CACHE_NAME).then(c => c.put(event.request, responseClone));
+      (async () => {
+        try {
+          const response = await fetch(request);
+          if (
+            response &&
+            response.ok &&
+            response.status === 200 &&
+            new URL(response.url).pathname === url.pathname
+          ) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(request, response.clone());
           }
           return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(event.request);
+        } catch (error) {
+          const cached = await caches.match(request);
           if (cached) return cached;
-          const offline = await caches.match('/offline.html');
-          if (offline) return offline;
-          return new Response('Offline', { status: 503 });
-        })
+
+          const offlineResponse = await caches.match(OFFLINE_FALLBACK_PATH);
+          if (offlineResponse) return offlineResponse;
+
+          return new Response('Offline', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+          });
+        }
+      })()
     );
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then(cached => {
+    (async () => {
+      const cached = await caches.match(request);
       if (cached) return cached;
-      return fetch(event.request).then(response => {
+
+      try {
+        const response = await fetch(request);
         if (response && response.ok && response.status === 200) {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then(c => c.put(event.request, responseClone));
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, response.clone());
         }
         return response;
-      }).catch(() => new Response('', { status: 503 }));
-    })
+      } catch (error) {
+        return new Response('', { status: 503 });
+      }
+    })()
   );
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data === 'skipWaiting') self.skipWaiting();
+  if (event.data === 'skipWaiting') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('sync', (event) => {
   if (event.tag === 'sync-attendance') {
     event.waitUntil(
-      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-        clients.forEach(client => client.postMessage({ type: 'sync-attendance' }));
-      })
+      self.clients
+        .matchAll({ type: 'window', includeUncontrolled: true })
+        .then((clients) => {
+          clients.forEach((client) => client.postMessage({ type: 'sync-attendance' }));
+        })
     );
   }
 });
