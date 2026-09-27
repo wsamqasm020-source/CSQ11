@@ -387,14 +387,26 @@ function printCard() {
     window.print();
 }
 
+window.addEventListener('offlineMutationSyncComplete', event => {
+    const detail = event.detail || {};
+    if (!detail.endpoint?.startsWith('/api/delete-student/')) return;
+    if (detail.error) alert(detail.error);
+    else window.location.href = '{{ url_for("students_page") }}';
+});
+
 function deleteStudent(id) {
     if (confirm('هل أنت متأكد من حذف هذا الطالب؟')) {
-        fetch(`/api/delete-student/${id}`, {
-            method: 'DELETE'
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
+        window.QRAttendance.submitMutation(`/api/delete-student/${id}`, { method: 'DELETE' })
+        .then(submission => {
+            if (submission.queued) {
+                alert('حُفظ طلب حذف الطالب على هذا الجهاز وسيُنفذ عند عودة الاتصال.');
+                return;
+            }
+            if (submission.error) {
+                alert(submission.error);
+                return;
+            }
+            if (submission.result?.success) {
                 window.location.href = '{{ url_for("students_page") }}';
             } else {
                 alert('حدث خطأ أثناء الحذف');
