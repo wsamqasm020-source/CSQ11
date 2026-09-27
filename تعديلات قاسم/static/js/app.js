@@ -11,14 +11,20 @@
         isOnline: navigator.onLine,
         isSyncing: false,
         isSyncingStudents: false,
+        isSyncingMutations: false,
+        mutationRequestsInFlight: new Set(),
         pendingSync: [],
         lastSync: null
     };
 
+    function currentSessionId() {
+        return document.body?.dataset.sessionId || '';
+    }
+
     // Database wrapper for offline storage
     const OfflineDB = {
         dbName: 'QRAttendanceDB',
-        dbVersion: 3,
+        dbVersion: 4,
         db: null,
 
         async init() {
@@ -64,6 +70,11 @@
                     if (!db.objectStoreNames.contains('pendingStudents')) {
                         db.createObjectStore('pendingStudents', { keyPath: 'requestId' });
                     }
+
+                    if (!db.objectStoreNames.contains('pendingMutations')) {
+                        const store = db.createObjectStore('pendingMutations', { keyPath: 'requestId' });
+                        store.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
                 };
             });
         },
@@ -75,6 +86,7 @@
                 const store = transaction.objectStore('pendingAttendance');
                 const request = store.add({
                     ...record,
+                    ownerId: record.ownerId || currentSessionId(),
                     timestamp: record.timestamp || new Date().toISOString(),
                     synced: false
                 });
@@ -239,6 +251,38 @@
                 transaction.onerror = () => reject(transaction.error);
                 transaction.onabort = () => reject(transaction.error);
             });
+        },
+
+        async addPendingMutation(record) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['pendingMutations'], 'readwrite');
+                transaction.objectStore('pendingMutations').put(record);
+                transaction.oncomplete = () => resolve(record);
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
+        },
+
+        async getPendingMutations() {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const request = this.db.transaction(['pendingMutations'], 'readonly')
+                    .objectStore('pendingMutations').getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        },
+
+        async removePendingMutation(requestId) {
+            if (!this.db) await this.init();
+            return new Promise((resolve, reject) => {
+                const transaction = this.db.transaction(['pendingMutations'], 'readwrite');
+                transaction.objectStore('pendingMutations').delete(requestId);
+                transaction.oncomplete = () => resolve();
+                transaction.onerror = () => reject(transaction.error);
+                transaction.onabort = () => reject(transaction.error);
+            });
         }
     };
 
@@ -252,6 +296,7 @@
             console.log('[App] Connection restored');
             syncPendingData();
             syncPendingStudents();
+            syncPendingMutations();
         } else {
             console.log('[App] Connection lost');
         }
@@ -287,7 +332,6 @@
         });
 
         scheduleBackgroundSync();
-        if (!navigator.onLine) return { queued: true, event_id: eventId };
 
         try {
             const response = await fetch(endpoint, {
@@ -318,6 +362,7 @@
         const requestId = payload.student_code;
         await OfflineDB.addPendingStudent({
             requestId,
+            ownerId: currentSessionId(),
             endpoint: '/api/generate-qr',
             payload,
             timestamp: new Date().toISOString()
@@ -356,6 +401,7 @@
         try {
             const pending = await OfflineDB.getPendingStudents();
             for (const record of pending) {
+                if (record.ownerId && record.ownerId !== currentSessionId()) continue;
                 try {
                     const response = await fetch(record.endpoint || '/api/generate-qr', {
                         method: 'POST',
@@ -391,9 +437,100 @@
         }
     }
 
+    async function submitMutation(endpoint, options = {}) {
+        if (!endpoint.startsWith('/api/')) throw new Error('Offline queue only supports same-origin API routes');
+        const method = (options.method || 'POST').toUpperCase();
+        if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+            throw new Error('Unsupported offline mutation method');
+        }
+
+        await OfflineDB.init();
+        const record = {
+            requestId: createEventId(),
+            ownerId: currentSessionId(),
+            endpoint,
+            method,
+            payload: options.payload,
+            timestamp: new Date().toISOString()
+        };
+        await OfflineDB.addPendingMutation(record);
+        scheduleBackgroundSync();
+
+        if (!navigator.onLine) return { queued: true, requestId: record.requestId };
+        return sendPendingMutation(record, false);
+    }
+
+    async function sendPendingMutation(record, fromQueue) {
+        if (AppState.mutationRequestsInFlight.has(record.requestId)) {
+            return { queued: true, requestId: record.requestId };
+        }
+        AppState.mutationRequestsInFlight.add(record.requestId);
+
+        try {
+            const headers = { 'X-Client-Request-ID': record.requestId };
+            const request = {
+                method: record.method,
+                credentials: 'same-origin',
+                headers
+            };
+            if (record.payload !== undefined) {
+                headers['Content-Type'] = 'application/json';
+                request.body = JSON.stringify(record.payload);
+            }
+
+            const response = await fetch(record.endpoint, request);
+            const contentType = response.headers.get('content-type') || '';
+            const result = contentType.includes('application/json')
+                ? await response.json().catch(() => ({}))
+                : null;
+
+            if (response.ok && !response.redirected && result?.success !== false) {
+                await OfflineDB.removePendingMutation(record.requestId);
+                if (fromQueue) {
+                    const detail = { requestId: record.requestId, endpoint: record.endpoint, result };
+                    window.dispatchEvent(new CustomEvent('offlineMutationSyncComplete', { detail }));
+                }
+                return { queued: false, result };
+            }
+
+            if (!response.redirected && response.status < 500 && result) {
+                await OfflineDB.removePendingMutation(record.requestId);
+                const error = result.message || 'رفض الخادم حفظ التغيير';
+                if (fromQueue) {
+                    window.dispatchEvent(new CustomEvent('offlineMutationSyncComplete', {
+                        detail: { requestId: record.requestId, endpoint: record.endpoint, error }
+                    }));
+                }
+                return { queued: false, error };
+            }
+
+            return { queued: true, requestId: record.requestId };
+        } catch (error) {
+            return { queued: true, requestId: record.requestId, error };
+        } finally {
+            AppState.mutationRequestsInFlight.delete(record.requestId);
+        }
+    }
+
+    async function syncPendingMutations() {
+        if (AppState.isSyncingMutations || !navigator.onLine) return;
+        AppState.isSyncingMutations = true;
+
+        try {
+            const pending = await OfflineDB.getPendingMutations();
+            for (const record of pending) {
+                if (record.ownerId && record.ownerId !== currentSessionId()) continue;
+                const result = await sendPendingMutation(record, true);
+                if (result.queued) break;
+            }
+        } finally {
+            AppState.isSyncingMutations = false;
+        }
+    }
+
     // Replay durable attendance records when connectivity returns.
     async function syncPendingData() {
-        if (AppState.isSyncing || !AppState.isOnline) return;
+        if (AppState.isSyncing) return;
         
         AppState.isSyncing = true;
         try {
@@ -406,6 +543,7 @@
 
             let syncedCount = 0;
             for (const record of pending) {
+                if (record.ownerId && record.ownerId !== currentSessionId()) continue;
                 try {
                     const endpoint = record.endpoint || '/api/scan-qr';
                     const storedPayload = record.payload || {
@@ -473,26 +611,32 @@
                 if (event.data && event.data.type === 'sync-attendance') {
                     syncPendingData();
                     syncPendingStudents();
+                    syncPendingMutations();
                 }
             });
         }
 
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && navigator.onLine) {
+            if (!document.hidden) {
                 syncPendingData();
-                syncPendingStudents();
+                if (navigator.onLine) {
+                    syncPendingStudents();
+                    syncPendingMutations();
+                }
             }
         });
         window.setInterval(() => {
+            syncPendingData();
             if (navigator.onLine) {
-                syncPendingData();
                 syncPendingStudents();
+                syncPendingMutations();
             }
         }, 60000);
 
+        syncPendingData();
         if (navigator.onLine) {
-            syncPendingData();
             syncPendingStudents();
+            syncPendingMutations();
         }
     });
 
@@ -503,7 +647,9 @@
         syncPendingData,
         submitAttendance,
         submitStudentRegistration,
-        syncPendingStudents
+        syncPendingStudents,
+        submitMutation,
+        syncPendingMutations
     };
 
 })();

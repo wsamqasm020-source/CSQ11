@@ -275,6 +275,7 @@
             if (!data.success) throw new Error(data.message);
 
             currentSubjectQR = data;
+            localStorage.setItem(`cachedSubjectQR_${subjectId}`, JSON.stringify(data));
             const subject = data.subject || {};
 
             document.getElementById('subjectQrImage').src = data.qr_code;
@@ -285,7 +286,19 @@
             showToast('تم توليد QR المادة — شاركه مع الطلاب', 'success');
 
         } catch (err) {
-            showToast(err.message || 'حدث خطأ', 'error');
+            const cachedValue = localStorage.getItem(`cachedSubjectQR_${subjectId}`);
+            const cachedQr = cachedValue ? JSON.parse(cachedValue) : null;
+            if (cachedQr?.expires_at && Date.parse(cachedQr.expires_at) > Date.now()) {
+                currentSubjectQR = cachedQr;
+                const subject = cachedQr.subject || {};
+                document.getElementById('subjectQrImage').src = cachedQr.qr_code;
+                document.getElementById('subjectQrLabel').textContent =
+                    `${subject.name || 'المادة'} — ${subject.teacher_name || ''}`;
+                document.getElementById('subjectQrBox').classList.remove('d-none');
+                showToast('يعرض آخر QR محفوظ وما زال صالحاً؛ يُحدّث عند عودة الاتصال', 'warning');
+            } else {
+                showToast('لا يوجد QR مادة صالح محفوظ. يلزم الاتصال لتوليد QR جديد.', 'error');
+            }
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-qrcode me-2"></i>توليد QR المادة';

@@ -1,18 +1,28 @@
 @echo off
 chcp 65001 >nul
 cls
+cd /d "%~dp0"
 echo ====================================
 echo   نظام الحضور - تشغيل السيرفر
 echo ====================================
 echo.
 
-REM تفعيل البيئة الافتراضية
-if exist venv\Scripts\activate.bat (
-    echo [✓] تفعيل البيئة الافتراضية...
-    call venv\Scripts\activate.bat
+REM تفعيل بيئة مساحة العمل أولاً
+if exist "%~dp0..\.venv\Scripts\activate.bat" (
+    echo [✓] تفعيل بيئة مساحة العمل .venv...
+    call "%~dp0..\.venv\Scripts\activate.bat"
 ) else (
-    echo [!] تحذير: البيئة الافتراضية غير موجودة
-    echo.
+    if exist "%~dp0.venv\Scripts\activate.bat" (
+        call "%~dp0.venv\Scripts\activate.bat"
+    ) else (
+      if exist "%~dp0venv\Scripts\activate.bat" (
+        echo [✓] تفعيل البيئة الافتراضية...
+        call "%~dp0venv\Scripts\activate.bat"
+      ) else (
+        echo [!] تحذير: البيئة الافتراضية غير موجودة
+        echo.
+      )
+    )
 )
 
 REM التحقق من تثبيت المكتبات
@@ -25,6 +35,7 @@ if errorlevel 1 (
 echo.
 echo [✓] جاري تشغيل السيرفر...
 echo [i] افتح المتصفح على: http://127.0.0.1:5000
+echo [i] رابط الطلاب يظهر في صفحة الشبكة بعد تشغيل الهوتسبوت
 echo [i] للإيقاف: اضغط Ctrl+C
 echo.
 echo ====================================

@@ -493,7 +493,7 @@
     
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body data-session-id="{% if session.get('student_id') %}student:{{ session.get('student_id') }}{% elif session.get('user_id') %}teacher:{{ session.get('user_id') }}{% else %}anonymous{% endif %}">
     <!-- Offline Indicator -->
     <div id="offline-indicator" class="offline-indicator">
         <i class="fas fa-wifi-slash me-2"></i>أنت غير متصل بالإنترنت. بعض الميزات قد لا تعمل.

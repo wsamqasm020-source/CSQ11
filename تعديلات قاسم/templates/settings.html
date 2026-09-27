@@ -263,6 +263,10 @@ function previewLogo() {
 
 function deleteUser(username) {
     if (confirm('هل أنت متأكد من حذف المستخدم ' + username + '؟')) {
+        if (!navigator.onLine) {
+            alert('حذف المستخدم يحتاج إلى اتصال بالخادم. لم يُحذف أي شيء.');
+            return;
+        }
         fetch('/delete-user/' + username, { method: 'DELETE' })
             .then(response => response.json())
             .then(data => {
@@ -276,4 +280,13 @@ function deleteUser(username) {
 }
 </script>
 {% endif %}
+<script>
+document.querySelectorAll('form[method="POST"]').forEach(form => {
+    form.addEventListener('submit', event => {
+        if (navigator.onLine) return;
+        event.preventDefault();
+        alert('تغيير كلمات المرور وإعدادات الحساب يحتاج إلى اتصال. لم تُحفظ أي بيانات سرية على هذا الجهاز.');
+    });
+});
+</script>
 {% endblock %}

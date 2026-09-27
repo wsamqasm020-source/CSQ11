@@ -360,6 +360,11 @@ document.addEventListener('DOMContentLoaded', function() {
             errorDiv.classList.remove('d-none');
             return;
         }
+        if (!navigator.onLine) {
+            errorText.textContent = 'تعيين كلمة المرور يحتاج إلى اتصال بالخادم؛ لم تُحفظ كلمة المرور على هذا الجهاز.';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
         errorDiv.classList.add('d-none');
 
         const btn = document.getElementById('confirmPasswordBtn');
@@ -403,9 +408,17 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
         if (!studentToDelete) return;
         try {
-            const response = await fetch(`/api/delete-student/${studentToDelete}`, { method: 'DELETE' });
-            const data = await response.json();
-            if (data.success) {
+            const submission = await window.QRAttendance.submitMutation(`/api/delete-student/${studentToDelete}`, { method: 'DELETE' });
+            if (submission.queued) {
+                bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+                alert('حُفظ طلب حذف الطالب على هذا الجهاز وسيُنفذ عند عودة الاتصال.');
+                return;
+            }
+            if (submission.error) {
+                alert(submission.error);
+                return;
+            }
+            if (submission.result?.success) {
                 bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
                 location.reload();
             } else {
@@ -513,12 +526,28 @@ function openPromoteModal() {
     new bootstrap.Modal(document.getElementById('promoteModal')).show();
 }
 
+window.addEventListener('offlineMutationSyncComplete', event => {
+    const detail = event.detail || {};
+    const queuedEndpoints = ['/api/delete-student/', '/api/promote-students', '/api/undo-promotion'];
+    if (!queuedEndpoints.some(endpoint => detail.endpoint?.startsWith(endpoint))) return;
+    if (detail.error) alert(detail.error);
+    else window.location.reload();
+});
+
 function undoPromotion() {
     if (!confirm('هل تريد التراجع عن آخر عملية ترقية؟\nسيتم إرجاع الطلاب المتأثرين فقط للمرحلة السابقة.')) return;
 
-    fetch('/api/undo-promotion', { method: 'POST' })
-    .then(r => r.json())
-    .then(data => {
+    window.QRAttendance.submitMutation('/api/undo-promotion')
+    .then(submission => {
+        if (submission.queued) {
+            alert('حُفظ طلب التراجع على هذا الجهاز وسيُنفذ عند عودة الاتصال.');
+            return;
+        }
+        if (submission.error) {
+            Swal.fire({ icon: 'error', title: 'خطأ', text: submission.error });
+            return;
+        }
+        const data = submission.result;
         if (data.success) {
             Swal.fire({
                 icon: 'success',
@@ -583,15 +612,23 @@ document.addEventListener('DOMContentLoaded', function() {
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> جاري التطبيق...';
 
-        fetch('/api/promote-students', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ from_grade: from, to_grade: to })
+        window.QRAttendance.submitMutation('/api/promote-students', {
+            payload: { from_grade: from, to_grade: to }
         })
-        .then(r => r.json())
-        .then(data => {
+        .then(submission => {
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-check me-1"></i> تطبيق الترقية';
+            if (submission.queued) {
+                bootstrap.Modal.getInstance(document.getElementById('promoteModal')).hide();
+                alert('حُفظ طلب الترقية على هذا الجهاز وسيُنفذ عند عودة الاتصال.');
+                return;
+            }
+            if (submission.error) {
+                errorText.textContent = submission.error;
+                errorDiv.classList.remove('d-none');
+                return;
+            }
+            const data = submission.result;
             if (data.success) {
                 bootstrap.Modal.getInstance(document.getElementById('promoteModal')).hide();
                 // إظهار زر التراجع
